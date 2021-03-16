@@ -138,7 +138,7 @@ if __name__ == "__main__":
                     sys.exit()
                 if args[i] == "-i" or args[i] == "--input":
                     import json
-                    with open(args[i+1]) as f:
+                    with open(args[i+1], encoding='UTF-8') as f:
                         tmp = json.load(f)
                         param["iv"] = [*tmp["video"].values()][0]
                         param["ia"] = [*tmp["audio"].values()][0]
