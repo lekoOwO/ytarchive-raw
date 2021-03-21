@@ -48,7 +48,7 @@ def openurl(url, retry=0):
         else:
             return openurl(url, retry+1)
 
-def download_segment(base_url, seg, seg_status):
+def download_segment(base_url, seg, seg_status, log_prefix=""):
     target_url = get_seg_url(base_url, seg)
 
     try:
@@ -63,7 +63,7 @@ def download_segment(base_url, seg, seg_status):
                
     except urllib.error.HTTPError as e:
         if DEBUG:
-            print(f"[DEBUG] Seg {seg} Failed with {e.code}")
+            print(f"[DEBUG]{log_prefix} Seg {seg} Failed with {e.code}")
         return False
 
 def merge_segs(target_file, seg_status):
@@ -89,7 +89,7 @@ def merge_segs(target_file, seg_status):
         seg_status.merged_seg += 1
         seg_status.segs.pop(seg_status.merged_seg)
 
-def main(url, target_file):
+def main(url, target_file, log_prefix=""):
     seg_status = SegmentStatus()
 
     merge_thread = threading.Thread(target=merge_segs, args=[target_file, seg_status])
@@ -100,17 +100,17 @@ def main(url, target_file):
 
     while fail_count < FAIL_THRESHOLD:
         if DEBUG:
-            print(f"[DEBUG] Current Seg: {seg}")
+            print(f"[DEBUG]{log_prefix} Current Seg: {seg}")
             
-        status = download_segment(url, seg, seg_status)
+        status = download_segment(url, seg, seg_status, log_prefix)
         if status:
             seg += 1
             fail_count = 0
         else:
             fail_count += 1
             if DEBUG:
-                print(f"[DEBUG] Failed Seg: {seg}")
-                print(f"[DEBUG] Fail Count: {fail_count}")
+                print(f"[DEBUG]{log_prefix} Failed Seg: {seg}")
+                print(f"[DEBUG]{log_prefix} Fail Count: {fail_count}")
             time.sleep(1)
 
     seg_status.end_seg = seg - 1 # Current seg is not available.
@@ -167,8 +167,8 @@ if __name__ == "__main__":
 
         param = {
             "output": None,
-            "iv": None,
-            "ia": None
+            "iv": [],
+            "ia": []
         }
 
         input_data = None
@@ -190,14 +190,14 @@ if __name__ == "__main__":
                     import json
                     with open(args[i+1], encoding='UTF-8') as f:
                         input_data = json.load(f)
-                        param["iv"] = [*input_data["video"].values()][0]
-                        param["ia"] = [*input_data["audio"].values()][0]
+                        param["iv"].append([*input_data["video"].values()][0])
+                        param["ia"].append([*input_data["audio"].values()][0])
                     i += 1
                 elif args[i] == "-iv" or args[i] == "--input-video":
-                    param["iv"] = args[i+1]
+                    param["iv"].append(args[i+1])
                     i += 1
                 elif args[i] == "-ia" or args[i] == "--input-audio":
-                    param["ia"] = args[i+1]
+                    param["ia"].append(args[i+1])
                     i += 1
                 elif args[i] == "-o" or args[i] == "--output":
                     param["output"] = args[i+1]
@@ -217,8 +217,10 @@ if __name__ == "__main__":
                     raise RuntimeError("Output param not found.")
             if pathlib.Path(param["output"]).suffix.lower() != ".mkv":
                 raise RuntimeError("Output should be a mkv file.")
-            if param["ia"] is None or param["iv"] is None:
+            if not param["ia"] or not param["iv"]:
                 raise RuntimeError("Input data not sufficient. Both video and audio has to be inputed.")
+            if len(param["ia"]) != len(param["iv"]):
+                raise RuntimeError("Input video and audio length mismatch.")
 
         tmp_video_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw_",  suffix="_video")
         tmp_video = tmp_video_f.name
@@ -228,16 +230,17 @@ if __name__ == "__main__":
         tmp_audio = tmp_audio_f.name
         tmp_audio_f.close()
 
-        video_thread = threading.Thread(target=main, args=(param["iv"], tmp_video), daemon=True)
-        audio_thread = threading.Thread(target=main, args=(param["ia"], tmp_audio), daemon=True)
+        for i in range(len(param["iv"])):
+            video_thread = threading.Thread(target=main, args=(param["iv"][i], tmp_video, f"[Video.{i}]"), daemon=True)
+            audio_thread = threading.Thread(target=main, args=(param["ia"][i], tmp_audio, f"[Audio.{i}]"), daemon=True)
 
-        video_thread.start()
-        audio_thread.start()
+            video_thread.start()
+            audio_thread.start()
 
-        while video_thread.is_alive():
-            video_thread.join(0.5)
-        while audio_thread.is_alive():
-            audio_thread.join(0.5)
+            while video_thread.is_alive():
+                video_thread.join(0.5)
+            while audio_thread.is_alive():
+                audio_thread.join(0.5)
 
         if DEBUG:
             print("[DEBUG] Download finished. Merging...")
