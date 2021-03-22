@@ -19,6 +19,15 @@ ACCENT_CHARS = dict(zip('ÂÃÄÀÁÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖŐØŒÙ�
                         itertools.chain('AAAAAA', ['AE'], 'CEEEEIIIIDNOOOOOOO', ['OE'], 'UUUUUY', ['TH', 'ss'],
                                         'aaaaaa', ['ae'], 'ceeeeiiiionooooooo', ['oe'], 'uuuuuy', ['th'], 'y')))
 
+opener = None
+
+def set_http_proxy(proxy):
+    handler =  urllib.request.ProxyHandler({
+        "http": f"http://{proxy}",
+        "https": f"http://{proxy}"
+    })
+    opener = urllib.request.build_opener(handler)
+
 def set_socks5_proxy(host, port):
     import socks
     import socket
@@ -46,7 +55,10 @@ def get_seg_url(url, seg):
 
 def openurl(url, retry=0):
     try:
-        return urllib.request.urlopen(url)
+        if opener:
+            return opener.open(url)
+        else:
+            return urllib.request.urlopen(url)
     except urllib.error.HTTPError as e:
         raise e
     except urllib.error.URLError as e:
@@ -192,6 +204,7 @@ if __name__ == "__main__":
     -ia, --input-audio [URL]    Input audio URL. Use with -iv.
     -o, --output [OUTPUT_FILE]  Output file path. Uses `YYYYMMDD TITLE (VIDEO_ID).mkv` by default.
     -s5, --socks5-proxy [proxy] Socks5 Proxy. No schema should be provided in the proxy url. PySocks should be installed.
+    -hp, --http-proxy [proxy]   HTTP Proxy.
                     """)
                     sys.exit()
                 if args[i] == "-i" or args[i] == "--input":
@@ -219,6 +232,10 @@ if __name__ == "__main__":
                         host = proxy
                         port = 3128
                     set_socks5_proxy(host, port)
+                    i += 1
+                elif args[i] == "-hp" or args[i] == "--http-proxy":
+                    proxy = args[i+1]
+                    set_http_proxy(proxy)
                     i += 1
                 else:
                     raise KeyError(f"Parameter not recognized: {args[i]}")
