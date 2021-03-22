@@ -219,6 +219,7 @@ if __name__ == "__main__":
                         host = proxy
                         port = 3128
                     set_socks5_proxy(host, port)
+                    i += 1
                 else:
                     raise KeyError(f"Parameter not recognized: {args[i]}")
                 
