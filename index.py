@@ -12,12 +12,19 @@ from datetime import date
 import re
 import itertools
 
-FAIL_THRESHOLD = 5
+FAIL_THRESHOLD = 20
 RETRY_THRESHOLD = 3
 DEBUG = True
 ACCENT_CHARS = dict(zip('ÂÃÄÀÁÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖŐØŒÙÚÛÜŰÝÞßàáâãäåæçèéêëìíîïðñòóôõöőøœùúûüűýþÿ',
                         itertools.chain('AAAAAA', ['AE'], 'CEEEEIIIIDNOOOOOOO', ['OE'], 'UUUUUY', ['TH', 'ss'],
                                         'aaaaaa', ['ae'], 'ceeeeiiiionooooooo', ['oe'], 'uuuuuy', ['th'], 'y')))
+
+def set_socks5_proxy(host, port)
+    import socks
+    import socket
+
+    socks.set_default_proxy(socks.SOCKS5, proxy, port)
+    socket.socket = socks.socksocket
 
 class SegmentStatus:
     def __init__(self):
@@ -184,6 +191,7 @@ if __name__ == "__main__":
     -iv, --input-video [URL]    Input video URL. Use with -ia.
     -ia, --input-audio [URL]    Input audio URL. Use with -iv.
     -o, --output [OUTPUT_FILE]  Output file path. Uses `YYYYMMDD TITLE (VIDEO_ID).mkv` by default.
+    -s5, --socks5-proxy [proxy] Socks5 Proxy. No schema should be provided in the proxy url. PySocks should be installed.
                     """)
                     sys.exit()
                 if args[i] == "-i" or args[i] == "--input":
@@ -202,6 +210,15 @@ if __name__ == "__main__":
                 elif args[i] == "-o" or args[i] == "--output":
                     param["output"] = args[i+1]
                     i += 1
+                elif args[i] == "-s5" or args[i] == "--socks5-proxy":
+                    proxy = args[i+1]
+                    if ":" in proxy:
+                        host, port = proxy.split(":")
+                        port = int(port)
+                    else:
+                        host = proxy
+                        port = 3128
+                    set_socks5_proxy(host, port)
                 else:
                     raise KeyError(f"Parameter not recognized: {args[i]}")
                 
