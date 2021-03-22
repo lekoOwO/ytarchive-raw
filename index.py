@@ -18,10 +18,11 @@ DEBUG = True
 ACCENT_CHARS = dict(zip('ÂÃÄÀÁÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖŐØŒÙÚÛÜŰÝÞßàáâãäåæçèéêëìíîïðñòóôõöőøœùúûüűýþÿ',
                         itertools.chain('AAAAAA', ['AE'], 'CEEEEIIIIDNOOOOOOO', ['OE'], 'UUUUUY', ['TH', 'ss'],
                                         'aaaaaa', ['ae'], 'ceeeeiiiionooooooo', ['oe'], 'uuuuuy', ['th'], 'y')))
-
+global opener
 opener = None
 
 def set_http_proxy(proxy):
+    global opener
     handler =  urllib.request.ProxyHandler({
         "http": f"http://{proxy}",
         "https": f"http://{proxy}"
@@ -54,6 +55,8 @@ def get_seg_url(url, seg):
     return urlunsplit(parsed_url)
 
 def openurl(url, retry=0):
+    global opener
+    
     try:
         if opener:
             return opener.open(url)
