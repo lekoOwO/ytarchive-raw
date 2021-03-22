@@ -56,7 +56,7 @@ def get_seg_url(url, seg):
 
 def openurl(url, retry=0):
     global opener
-    
+
     try:
         if opener:
             return opener.open(url)
@@ -329,5 +329,11 @@ if __name__ == "__main__":
 
         try:
             os.remove(tmp_audio)
+        except:
+            pass
+
+        try:
+            if tmp_thumbnail:
+                os.remove(tmp_thumbnail)
         except:
             pass
