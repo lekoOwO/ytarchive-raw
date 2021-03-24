@@ -1,6 +1,7 @@
 import urllib.request
 from urllib.parse import parse_qs, urlsplit, urlunsplit, urlencode
 import urllib.error
+import http.client
 import shutil
 import time
 import threading
@@ -62,6 +63,11 @@ def openurl(url, retry=0):
             return opener.open(url)
         else:
             return urllib.request.urlopen(url)
+    except http.client.IncompleteRead as e:
+        if retry >= RETRY_THRESHOLD:
+            raise e
+        else:
+            return openurl(url, retry+1)
     except urllib.error.HTTPError as e:
         raise e
     except urllib.error.URLError as e:
