@@ -137,8 +137,7 @@ def main(url, target_file, log_prefix=""):
         else:
             fail_count += 1
             if DEBUG:
-                print(f"[DEBUG]{log_prefix} Failed Seg: {seg}")
-                print(f"[DEBUG]{log_prefix} Fail Count: {fail_count}")
+                print(f"[DEBUG]{log_prefix} Failed Seg: {seg} [{fail_count}/{FAIL_THRESHOLD}]")
             time.sleep(1)
 
     seg_status.end_seg = seg - 1 # Current seg is not available.
