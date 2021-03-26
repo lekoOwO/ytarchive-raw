@@ -12,14 +12,29 @@ import shlex
 from datetime import date
 import re
 import itertools
+import traceback
 
 FAIL_THRESHOLD = 20
 RETRY_THRESHOLD = 3
 SLEEP_AFTER_FETCH_FREG = 0
 DEBUG = True
+THREADS = 1
+
 ACCENT_CHARS = dict(zip('ÂÃÄÀÁÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖŐØŒÙÚÛÜŰÝÞßàáâãäåæçèéêëìíîïðñòóôõöőøœùúûüűýþÿ',
                         itertools.chain('AAAAAA', ['AE'], 'CEEEEIIIIDNOOOOOOO', ['OE'], 'UUUUUY', ['TH', 'ss'],
                                         'aaaaaa', ['ae'], 'ceeeeiiiionooooooo', ['oe'], 'uuuuuy', ['th'], 'y')))
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
 global opener
 opener = None
 
@@ -38,13 +53,6 @@ def set_socks5_proxy(host, port):
     socks.set_default_proxy(socks.SOCKS5, proxy, port)
     socket.socket = socks.socksocket
 
-class SegmentStatus:
-    def __init__(self):
-        self.segs = {}
-        self.merged_seg = -1
-        self.end_seg = None
-
-
 def get_seg_url(url, seg):
     parsed_url = urlsplit(url)
     qs = parse_qs(parsed_url.query)
@@ -55,6 +63,53 @@ def get_seg_url(url, seg):
     parsed_url[3] = urlencode(qs, doseq=True)
 
     return urlunsplit(parsed_url)
+
+def is_seg_valid(url):
+    try:
+        with urllib.request.urlopen(url) as f:
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            return True
+        elif e.code == 404:
+            return False
+        else:
+            raise e
+
+def get_total_segment(url, seg_range=(0, 25000)):
+    if seg_range[0] + 1 == seg_range[1]:
+        return seg_range[0]
+    
+    try_seg = int((seg_range[0] + seg_range[1]) / 2)
+    seg_url = get_seg_url(url, try_seg)
+    if is_seg_valid(seg_url):
+        return get_total_segment(url, (try_seg, seg_range[1]))
+    else:
+        return get_total_segment(url, (seg_range[0], try_seg))
+
+class SegmentStatus:
+    def __init__(self, url, log_prefix="", print=print):
+        self.segs = {}
+        self.merged_seg = -1
+
+        if DEBUG:
+            print(f"[DEBUG]{log_prefix} Try getting total segments...")
+        self.end_seg = get_total_segment(url)
+        if DEBUG:
+            print(f"[DEBUG]{log_prefix} Total segments: {self.end_seg}")
+
+        self.seg_groups = []
+
+        # Groups
+        last_seg = -1
+        interval = int(self.end_seg / THREADS)
+        while True:
+            if last_seg+1 + interval < self.end_seg:
+                self.seg_groups.append((last_seg + 1, last_seg + 1 + interval))
+                last_seg = last_seg + 1 + interval
+            else:
+                self.seg_groups.append((last_seg + 1, self.end_seg))
+                break
 
 def openurl(url, retry=0):
     global opener
@@ -77,17 +132,15 @@ def openurl(url, retry=0):
         else:
             return openurl(url, retry+1)
 
-def download_segment(base_url, seg, seg_status, log_prefix=""):
+def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
     target_url = get_seg_url(base_url, seg)
 
+    target_url_with_header = urllib.request.Request(target_url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36"
+    })
+
     try:
-        with openurl(target_url) as response:
-            if response.getcode() >= 300 or response.getcode() < 200:
-                return False
-            
-            if SLEEP_AFTER_FETCH_FREG > 0:
-                time.sleep(SLEEP_AFTER_FETCH_FREG)
-            
+        with openurl(target_url_with_header) as response:
             with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw_",  suffix=".seg") as tmp_file:
                 shutil.copyfileobj(response, tmp_file)
                 seg_status.segs[seg] = tmp_file.name
@@ -97,10 +150,7 @@ def download_segment(base_url, seg, seg_status, log_prefix=""):
         if DEBUG:
             print(f"[DEBUG]{log_prefix} Seg {seg} Failed with {e.code}")
         if e.code == 403:
-            try:
-                openurl(base_url)
-            except:
-                pass
+            threading.Thread(target=openurl, args=[base_url]).start()
         return False
 
 def merge_segs(target_file, seg_status):
@@ -126,30 +176,40 @@ def merge_segs(target_file, seg_status):
         seg_status.merged_seg += 1
         seg_status.segs.pop(seg_status.merged_seg)
 
-def main(url, target_file, log_prefix=""):
-    seg_status = SegmentStatus()
-
-    merge_thread = threading.Thread(target=merge_segs, args=[target_file, seg_status])
-    merge_thread.start()
-
-    seg = seg_status.merged_seg + 1
+def download_seg_group(url, seg_group_index, seg_status, log_prefix="", print=print):
+    seg_range = seg_status.seg_groups[seg_group_index]
+    seg = seg_range[0]
     fail_count = 0
 
-    while fail_count < FAIL_THRESHOLD:
-        if DEBUG:
-            print(f"[DEBUG]{log_prefix} Current Seg: {seg}")
-            
-        status = download_segment(url, seg, seg_status, log_prefix)
-        if status:
-            seg += 1
-            fail_count = 0
-        else:
-            fail_count += 1
-            if DEBUG:
-                print(f"[DEBUG]{log_prefix} Failed Seg: {seg} [{fail_count}/{FAIL_THRESHOLD}]")
-            time.sleep(1)
+    try:
+        while fail_count < FAIL_THRESHOLD:            
+            status = download_segment(url, seg, seg_status, log_prefix, print)
+            if status:
+                if DEBUG:
+                    print(f"[DEBUG]{log_prefix} Success Seg: {seg}")
+                if seg == seg_range[1]:
+                    return True
+                seg += 1
+                fail_count = 0
+            else:
+                fail_count += 1
+                if DEBUG:
+                    print(f"[DEBUG]{log_prefix} Failed Seg: {seg} [{fail_count}/{FAIL_THRESHOLD}]")
+                time.sleep(1)
+    except:
+        traceback.print_exc()
+        sys.exit(1)
 
-    seg_status.end_seg = seg - 1 # Current seg is not available.
+
+def main(url, target_file, log_prefix="", print=print):
+    seg_status = SegmentStatus(url, log_prefix, print)
+
+    merge_thread = threading.Thread(target=merge_segs, args=(target_file, seg_status))
+    merge_thread.start()
+
+    for i in range(len(seg_status.seg_groups)):
+        threading.Thread(target=download_seg_group, args=(url, i, seg_status, log_prefix, print)).start()
+
     merge_thread.join() # Wait for merge finished
 
 # ===== utils =====
@@ -283,8 +343,8 @@ if __name__ == "__main__":
         tmp_audio_f.close()
 
         for i in range(len(param["iv"])):
-            video_thread = threading.Thread(target=main, args=(param["iv"][i], tmp_video, f"[Video.{i}]"), daemon=True)
-            audio_thread = threading.Thread(target=main, args=(param["ia"][i], tmp_audio, f"[Audio.{i}]"), daemon=True)
+            video_thread = threading.Thread(target=main, args=(param["iv"][i], tmp_video, f"[Video.{i}]", lambda x:print(f"{bcolors.OKBLUE}{x}{bcolors.ENDC}")), daemon=True)
+            audio_thread = threading.Thread(target=main, args=(param["ia"][i], tmp_audio, f"[Audio.{i}]", lambda x:print(f"{bcolors.OKGREEN}{x}{bcolors.ENDC}")), daemon=True)
 
             video_thread.start()
             audio_thread.start()
