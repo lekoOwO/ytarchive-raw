@@ -204,11 +204,11 @@ def download_seg_group(url, seg_group_index, seg_status, log_prefix="", print=pr
 def main(url, target_file, log_prefix="", print=print):
     seg_status = SegmentStatus(url, log_prefix, print)
 
-    merge_thread = threading.Thread(target=merge_segs, args=(target_file, seg_status))
+    merge_thread = threading.Thread(target=merge_segs, args=(target_file, seg_status), daemon=True)
     merge_thread.start()
 
     for i in range(len(seg_status.seg_groups)):
-        threading.Thread(target=download_seg_group, args=(url, i, seg_status, log_prefix, print)).start()
+        threading.Thread(target=download_seg_group, args=(url, i, seg_status, log_prefix, print), daemon=True).start()
 
     merge_thread.join() # Wait for merge finished
 
