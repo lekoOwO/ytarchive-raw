@@ -15,7 +15,7 @@ import itertools
 
 FAIL_THRESHOLD = 20
 RETRY_THRESHOLD = 3
-SLEEP_AFTER_FETCH_FREG = 0.1
+SLEEP_AFTER_FETCH_FREG = 0
 DEBUG = True
 ACCENT_CHARS = dict(zip('ÂÃÄÀÁÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖŐØŒÙÚÛÜŰÝÞßàáâãäåæçèéêëìíîïðñòóôõöőøœùúûüűýþÿ',
                         itertools.chain('AAAAAA', ['AE'], 'CEEEEIIIIDNOOOOOOO', ['OE'], 'UUUUUY', ['TH', 'ss'],
@@ -96,6 +96,11 @@ def download_segment(base_url, seg, seg_status, log_prefix=""):
     except urllib.error.HTTPError as e:
         if DEBUG:
             print(f"[DEBUG]{log_prefix} Seg {seg} Failed with {e.code}")
+        if e.code == 403:
+            try:
+                openurl(base_url)
+            except:
+                pass
         return False
 
 def merge_segs(target_file, seg_status):
