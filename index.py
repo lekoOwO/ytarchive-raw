@@ -282,6 +282,8 @@ if __name__ == "__main__":
     -o, --output [OUTPUT_FILE]  Output file path. Uses `YYYYMMDD TITLE (VIDEO_ID).mkv` by default.
     -s5, --socks5-proxy [proxy] Socks5 Proxy. No schema should be provided in the proxy url. PySocks should be installed.
     -hp, --http-proxy [proxy]   HTTP Proxy.
+    -t, --threads [INT]         Multi-thread download, experimental.
+    -ft, --fail-threshold [INT] Times for retrying when encounter HTTP errors. Default 20.
                     """)
                     sys.exit()
                 if args[i] == "-i" or args[i] == "--input":
@@ -313,6 +315,12 @@ if __name__ == "__main__":
                 elif args[i] == "-hp" or args[i] == "--http-proxy":
                     proxy = args[i+1]
                     set_http_proxy(proxy)
+                    i += 1
+                elif args[i] == "-t" or args[i] == "--threads":
+                    THREADS = int(args[i + 1])
+                    i += 1
+                elif args[i] == "-ft" or args[i] == "--fail-threshold":
+                    FAIL_THRESHOLD = int(args[i + 1])
                     i += 1
                 else:
                     raise KeyError(f"Parameter not recognized: {args[i]}")
