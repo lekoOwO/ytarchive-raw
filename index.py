@@ -15,6 +15,7 @@ import itertools
 
 FAIL_THRESHOLD = 20
 RETRY_THRESHOLD = 3
+SLEEP_AFTER_FETCH_FREG = 0.1
 DEBUG = True
 ACCENT_CHARS = dict(zip('ÂÃÄÀÁÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖŐØŒÙÚÛÜŰÝÞßàáâãäåæçèéêëìíîïðñòóôõöőøœùúûüűýþÿ',
                         itertools.chain('AAAAAA', ['AE'], 'CEEEEIIIIDNOOOOOOO', ['OE'], 'UUUUUY', ['TH', 'ss'],
@@ -83,6 +84,9 @@ def download_segment(base_url, seg, seg_status, log_prefix=""):
         with openurl(target_url) as response:
             if response.getcode() >= 300 or response.getcode() < 200:
                 return False
+            
+            if SLEEP_AFTER_FETCH_FREG > 0:
+                time.sleep(SLEEP_AFTER_FETCH_FREG)
             
             with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw_",  suffix=".seg") as tmp_file:
                 shutil.copyfileobj(response, tmp_file)
