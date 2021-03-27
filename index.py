@@ -111,7 +111,7 @@ def get_total_segment(url):
             headers = f.headers
     except urllib.error.HTTPError as e:
         headers = e.headers
-    return int(headers["x-head-seqnum"]) - 1
+    return int(headers["x-head-seqnum"])
 class SegmentStatus:
     def __init__(self, url, log_prefix="", print=print):
         self.segs = {}
@@ -252,19 +252,20 @@ def merge_segs(target_file, seg_status):
             time.sleep(0.1)
             continue
         
-        if os.path.exists(target_file):
-            mode = "ab"
-        else:
-            mode = "wb"
+        if seg_status.segs[seg_status.merged_seg + 1] is not None:
+            if os.path.exists(target_file):
+                mode = "ab"
+            else:
+                mode = "wb"
 
-        with open(target_file, mode) as target:
-            with open(seg_status.segs[seg_status.merged_seg + 1], "rb") as source:
-                shutil.copyfileobj(source, target)
+            with open(target_file, mode) as target:
+                with open(seg_status.segs[seg_status.merged_seg + 1], "rb") as source:
+                    shutil.copyfileobj(source, target)
 
-        try:
-            os.remove(seg_status.segs[seg_status.merged_seg + 1])
-        except:
-            pass
+            try:
+                os.remove(seg_status.segs[seg_status.merged_seg + 1])
+            except:
+                pass
 
         seg_status.merged_seg += 1
         seg_status.segs.pop(seg_status.merged_seg)
@@ -275,23 +276,34 @@ def download_seg_group(url, seg_group_index, seg_status, log_prefix="", print=pr
     fail_count = 0
 
     try:
-        while fail_count < FAIL_THRESHOLD:
-            if DEBUG:
-                print(f"[DEBUG]{log_prefix} Current Seg: {seg}")
-            status = download_segment(url, seg, seg_status, log_prefix, print)
-            if status:
+        while True:
+            if fail_count < FAIL_THRESHOLD:
                 if DEBUG:
-                    print(f"[DEBUG]{log_prefix} Success Seg: {seg}")
+                    print(f"[DEBUG]{log_prefix} Current Seg: {seg}")
+                status = download_segment(url, seg, seg_status, log_prefix, print)
+                if status:
+                    if DEBUG:
+                        print(f"[DEBUG]{log_prefix} Success Seg: {seg}")
+                    if seg == seg_range[1]:
+                        return True
+                    post_dl_seg(seg)
+                    seg += 1
+                    fail_count = 0
+                else:
+                    fail_count += 1
+                    if DEBUG:
+                        print(f"[DEBUG]{log_prefix} Failed Seg: {seg} [{fail_count}/{FAIL_THRESHOLD}]")
+                    time.sleep(1)
+            else:
+                if DEBUG:
+                    print(f"[DEBUG]{log_prefix} Giving up seg: {seg}")
                 if seg == seg_range[1]:
                     return True
+                seg_status.segs[seg] = None # Skip this seg
                 post_dl_seg(seg)
                 seg += 1
                 fail_count = 0
-            else:
-                fail_count += 1
-                if DEBUG:
-                    print(f"[DEBUG]{log_prefix} Failed Seg: {seg} [{fail_count}/{FAIL_THRESHOLD}]")
-                time.sleep(1)
+                
     except:
         traceback.print_exc()
         sys.exit(1)
