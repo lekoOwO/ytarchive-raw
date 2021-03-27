@@ -111,7 +111,7 @@ def get_total_segment(url):
             headers = f.headers
     except urllib.error.HTTPError as e:
         headers = e.headers
-    return int(headers["x-head-seqnum"])
+    return int(headers["x-head-seqnum"]) - 1
 class SegmentStatus:
     def __init__(self, url, log_prefix="", print=print):
         self.segs = {}
