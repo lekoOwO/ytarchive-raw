@@ -231,7 +231,7 @@ def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
     while True:
         try:
             with openurl(target_url_with_header) as response:
-                with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".seg", dir=BASE_DIR) as tmp_file:
+                with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f"{seg}.seg", dir=BASE_DIR) as tmp_file:
                     shutil.copyfileobj(response, tmp_file)
                     seg_status.segs[seg] = tmp_file.name
                 return True
