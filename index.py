@@ -228,20 +228,23 @@ def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
     target_url_with_header = urllib.request.Request(target_url, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36"
     })
+    while True:
+        try:
+            with openurl(target_url_with_header) as response:
+                with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".seg", dir=BASE_DIR) as tmp_file:
+                    shutil.copyfileobj(response, tmp_file)
+                    seg_status.segs[seg] = tmp_file.name
+                return True
+                
+        except urllib.error.HTTPError as e:
+            if DEBUG:
+                print(f"[DEBUG]{log_prefix} Seg {seg} Failed with {e.code}")
+            if e.code == 403:
+                openurl(base_url)
+            return False
 
-    try:
-        with openurl(target_url_with_header) as response:
-            with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".seg", dir=BASE_DIR) as tmp_file:
-                shutil.copyfileobj(response, tmp_file)
-                seg_status.segs[seg] = tmp_file.name
-            return True
-               
-    except urllib.error.HTTPError as e:
-        if DEBUG:
-            print(f"[DEBUG]{log_prefix} Seg {seg} Failed with {e.code}")
-        if e.code == 403:
-            openurl(base_url)
-        return False
+        except http.client.IncompleteRead as e:
+            continue
 
 def merge_segs(target_file, seg_status):
     while seg_status.end_seg is None or seg_status.merged_seg != seg_status.end_seg:
