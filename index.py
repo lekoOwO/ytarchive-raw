@@ -17,13 +17,19 @@ import traceback
 FAIL_THRESHOLD = 20
 RETRY_THRESHOLD = 3
 SLEEP_AFTER_FETCH_FREG = 0
-DEBUG = True
+DEBUG = False
 THREADS = 1
+
+PBAR_LEN = 80
+PBAR_SYMBOL = "█"
+PBAR_EMPTY_SYMBOL = "-"
+PBAR_PRINT_INTERVAL = 5
 
 ACCENT_CHARS = dict(zip('ÂÃÄÀÁÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖŐØŒÙÚÛÜŰÝÞßàáâãäåæçèéêëìíîïðñòóôõöőøœùúûüűýþÿ',
                         itertools.chain('AAAAAA', ['AE'], 'CEEEEIIIIDNOOOOOOO', ['OE'], 'UUUUUY', ['TH', 'ss'],
                                         'aaaaaa', ['ae'], 'ceeeeiiiionooooooo', ['oe'], 'uuuuuy', ['th'], 'y')))
 
+# Beautiful stuff
 class bcolors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -35,6 +41,33 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
+class ProgressBar:
+    def __init__(self, total, print=print):
+        self.total = total
+        self.progress = []
+        self.progress_index = {}
+        self.print = print
+        self.finished = 0
+
+        for i in range(PBAR_LEN):
+            x = int(total / PBAR_LEN) * (i+1)
+            self.progress.append([x, False])
+            self.progress_index[x] = i
+
+    def done(self, i):
+        if i in self.progress_index:
+            self.progress[self.progress_index[i]][1] = True
+        self.finished += 1
+        if not self.finished % PBAR_PRINT_INTERVAL:
+            self.print_progress()
+
+    def print_progress(self):
+        bar = ''
+        for x in self.progress:
+            bar += PBAR_SYMBOL if x[1] else PBAR_EMPTY_SYMBOL
+        self.print(bar, self.finished / self.total)
+
+# Beautiful stuff end
 global opener
 opener = None
 
@@ -64,39 +97,23 @@ def get_seg_url(url, seg):
 
     return urlunsplit(parsed_url)
 
-def is_seg_valid(url):
+def get_total_segment(url):
+    seg_url = get_seg_url(url, 0)
+    headers = None
     try:
-        with urllib.request.urlopen(url) as f:
-            return True
+        with urllib.request.urlopen(seg_url) as f:
+            headers = f.headers
     except urllib.error.HTTPError as e:
-        if e.code == 403:
-            return True
-        elif e.code == 404:
-            return False
-        else:
-            raise e
-
-def get_total_segment(url, seg_range=(0, 25000)):
-    if seg_range[0] + 1 == seg_range[1]:
-        return seg_range[0]
-    
-    try_seg = int((seg_range[0] + seg_range[1]) / 2)
-    seg_url = get_seg_url(url, try_seg)
-    if is_seg_valid(seg_url):
-        return get_total_segment(url, (try_seg, seg_range[1]))
-    else:
-        return get_total_segment(url, (seg_range[0], try_seg))
-
+        headers = e.headers
+    return int(headers["x-head-seqnum"])
 class SegmentStatus:
     def __init__(self, url, log_prefix="", print=print):
         self.segs = {}
         self.merged_seg = -1
 
-        if DEBUG:
-            print(f"[DEBUG]{log_prefix} Try getting total segments...")
+        print(f"[INFO]{log_prefix} Try getting total segments...")
         self.end_seg = get_total_segment(url)
-        if DEBUG:
-            print(f"[DEBUG]{log_prefix} Total segments: {self.end_seg}")
+        print(f"[INFO]{log_prefix} Total segments: {self.end_seg}")
 
         self.seg_groups = []
 
@@ -150,7 +167,7 @@ def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
         if DEBUG:
             print(f"[DEBUG]{log_prefix} Seg {seg} Failed with {e.code}")
         if e.code == 403:
-            threading.Thread(target=openurl, args=[base_url]).start()
+            openurl(base_url)
         return False
 
 def merge_segs(target_file, seg_status):
@@ -176,19 +193,22 @@ def merge_segs(target_file, seg_status):
         seg_status.merged_seg += 1
         seg_status.segs.pop(seg_status.merged_seg)
 
-def download_seg_group(url, seg_group_index, seg_status, log_prefix="", print=print):
+def download_seg_group(url, seg_group_index, seg_status, log_prefix="", print=print, post_dl_seg=lambda x:True):
     seg_range = seg_status.seg_groups[seg_group_index]
     seg = seg_range[0]
     fail_count = 0
 
     try:
-        while fail_count < FAIL_THRESHOLD:            
+        while fail_count < FAIL_THRESHOLD:
+            if DEBUG:
+                print(f"[DEBUG]{log_prefix} Current Seg: {seg}")
             status = download_segment(url, seg, seg_status, log_prefix, print)
             if status:
                 if DEBUG:
                     print(f"[DEBUG]{log_prefix} Success Seg: {seg}")
                 if seg == seg_range[1]:
                     return True
+                post_dl_seg(seg)
                 seg += 1
                 fail_count = 0
             else:
@@ -203,12 +223,13 @@ def download_seg_group(url, seg_group_index, seg_status, log_prefix="", print=pr
 
 def main(url, target_file, log_prefix="", print=print):
     seg_status = SegmentStatus(url, log_prefix, print)
+    pbar = ProgressBar(seg_status.end_seg, lambda bar,p: print(f"{log_prefix}: |{bar}| {'{:.2f}'.format(p*100)}%"))
 
     merge_thread = threading.Thread(target=merge_segs, args=(target_file, seg_status), daemon=True)
     merge_thread.start()
 
     for i in range(len(seg_status.seg_groups)):
-        threading.Thread(target=download_seg_group, args=(url, i, seg_status, log_prefix, print), daemon=True).start()
+        threading.Thread(target=download_seg_group, args=(url, i, seg_status, log_prefix, print, lambda x: pbar.done(x)), daemon=True).start()
 
     merge_thread.join() # Wait for merge finished
 
