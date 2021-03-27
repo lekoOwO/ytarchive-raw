@@ -13,12 +13,18 @@ from datetime import date
 import re
 import itertools
 import traceback
+import functools
+import random
+import ipaddress
 
 FAIL_THRESHOLD = 20
 RETRY_THRESHOLD = 3
 SLEEP_AFTER_FETCH_FREG = 0
 DEBUG = False
 THREADS = 1
+IP_POOL = None
+
+BASE_DIR = None
 
 PBAR_LEN = 80
 PBAR_SYMBOL = "█"
@@ -58,7 +64,7 @@ class ProgressBar:
         if i in self.progress_index:
             self.progress[self.progress_index[i]][1] = True
         self.finished += 1
-        if not self.finished % PBAR_PRINT_INTERVAL:
+        if not self.finished % PBAR_PRINT_INTERVAL or self.finished == self.total:
             self.print_progress()
 
     def print_progress(self):
@@ -128,26 +134,93 @@ class SegmentStatus:
                 self.seg_groups.append((last_seg + 1, self.end_seg))
                 break
 
-def openurl(url, retry=0):
+## IP Pool
+class BoundHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, *args, source_address=None, **kwargs):
+        urllib.request.HTTPHandler.__init__(self, *args, **kwargs)
+        self.http_class = functools.partial(http.client.HTTPConnection,
+                source_address=source_address)
+
+    def http_open(self, req):
+        return self.do_open(self.http_class, req)
+
+class BoundHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, *args, source_address=None, **kwargs):
+        urllib.request.HTTPSHandler.__init__(self, *args, **kwargs)
+        self.https_class = functools.partial(http.client.HTTPSConnection,
+                source_address=source_address)
+
+    def https_open(self, req):
+        return self.do_open(self.https_class, req,
+                context=self._context, check_hostname=self._check_hostname)
+
+def get_random_line(filepath: str) -> str:
+    file_size = os.path.getsize(filepath)
+    with open(filepath, 'rb') as f:
+        while True:
+            pos = random.randint(0, file_size)
+            if not pos:  # the first line is chosen
+                return f.readline().decode()  # return str
+            f.seek(pos)  # seek to random position
+            f.readline()  # skip possibly incomplete line
+            line = f.readline()  # read next (full) line
+            if line:
+                return line.decode()
+            # else: line is empty -> EOF -> try another position in next iteration
+
+def is_ip(ip):
+    try:
+        ip = ipaddress.ip_address(ip)
+        return True
+    except ValueError:
+        return False
+
+def get_pool_ip():
+    if IP_POOL:
+        if os.path.isfile(IP_POOL):
+            for _ in range(3): 
+                ip = get_random_line(IP_POOL).rstrip().lstrip()
+                if is_ip(ip):
+                    return ip
+    return None
+
+## IP Pool end
+
+def openurl(url, retry=0, source_address="random"):
     global opener
 
     try:
         if opener:
             return opener.open(url)
         else:
-            return urllib.request.urlopen(url)
+            if source_address == "random":
+                source_address = get_pool_ip()
+            if not is_ip(source_address):
+                source_address = None
+            if source_address:
+                if DEBUG:
+                    print(f"Using IP: {source_address}")
+                if type(url) == str:
+                    schema = urllib.parse.urlsplit(url).scheme
+                elif isinstance(url, urllib.request.Request):
+                    schema = urllib.parse.urlsplit(url.full_url).scheme
+
+                handler = (BoundHTTPHandler if schema == "http" else BoundHTTPSHandler)(source_address=(source_address, 0))
+                return urllib.request.build_opener(handler).open(url)
+            else:
+                return urllib.request.urlopen(url)
     except http.client.IncompleteRead as e:
         if retry >= RETRY_THRESHOLD:
             raise e
         else:
-            return openurl(url, retry+1)
+            return openurl(url, retry+1, source_address)
     except urllib.error.HTTPError as e:
         raise e
     except urllib.error.URLError as e:
         if retry >= RETRY_THRESHOLD:
             raise e
         else:
-            return openurl(url, retry+1)
+            return openurl(url, retry+1, source_address)
 
 def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
     target_url = get_seg_url(base_url, seg)
@@ -158,7 +231,7 @@ def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
 
     try:
         with openurl(target_url_with_header) as response:
-            with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw_",  suffix=".seg") as tmp_file:
+            with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".seg", dir=BASE_DIR) as tmp_file:
                 shutil.copyfileobj(response, tmp_file)
                 seg_status.segs[seg] = tmp_file.name
             return True
@@ -300,11 +373,15 @@ if __name__ == "__main__":
     -i, --input [JSON_FILE]     Input JSON file. Do not use with -iv or -ia.
     -iv, --input-video [URL]    Input video URL. Use with -ia.
     -ia, --input-audio [URL]    Input audio URL. Use with -iv.
+    
     -o, --output [OUTPUT_FILE]  Output file path. Uses `YYYYMMDD TITLE (VIDEO_ID).mkv` by default.
     -s5, --socks5-proxy [proxy] Socks5 Proxy. No schema should be provided in the proxy url. PySocks should be installed.
     -hp, --http-proxy [proxy]   HTTP Proxy.
     -t, --threads [INT]         Multi-thread download, experimental.
-    -ft, --fail-threshold [INT] Times for retrying when encounter HTTP errors. Default 20.
+    -ft, --fail-threshold [INT] Secs for retrying when encounter HTTP errors. Default 20.
+    -p, --pool [FILE]           IP Pool file.
+    -td, --temp-dir [DIR]       Temp file dir.
+    -d, --debug                 Enable debug mode.
                     """)
                     sys.exit()
                 if args[i] == "-i" or args[i] == "--input":
@@ -343,6 +420,11 @@ if __name__ == "__main__":
                 elif args[i] == "-ft" or args[i] == "--fail-threshold":
                     FAIL_THRESHOLD = int(args[i + 1])
                     i += 1
+                elif args[i] == "-p" or args[i] == "--pool":
+                    IP_POOL = int(args[i + 1])
+                    i += 1
+                elif args[i] == "-d" or args[i] == "--debug":
+                    DEBUG = True
                 else:
                     raise KeyError(f"Parameter not recognized: {args[i]}")
                 
@@ -363,11 +445,14 @@ if __name__ == "__main__":
             if len(param["ia"]) != len(param["iv"]):
                 raise RuntimeError("Input video and audio length mismatch.")
 
-        tmp_video_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw_",  suffix="_video")
+        if not BASE_DIR:
+            BASE_DIR = tempfile.mkdtemp(prefix="ytarchive_raw.", suffix=f".{input_data['metadata']['id']}" if input_data is not None else None)
+
+        tmp_video_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".video", dir=BASE_DIR)
         tmp_video = tmp_video_f.name
         tmp_video_f.close()
 
-        tmp_audio_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw_",  suffix="_audio")
+        tmp_audio_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".audio", dir=BASE_DIR)
         tmp_audio = tmp_audio_f.name
         tmp_audio_f.close()
 
@@ -389,7 +474,7 @@ if __name__ == "__main__":
         if input_data is not None:
             tmp_thumbnail = None
             with urllib.request.urlopen(input_data['metadata']["thumbnail"]) as response:
-                with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw_", suffix=".jpg") as tmp_file:
+                with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".jpg", dir=BASE_DIR) as tmp_file:
                     shutil.copyfileobj(response, tmp_file)
                     tmp_thumbnail = tmp_file.name
             
@@ -426,17 +511,6 @@ if __name__ == "__main__":
 
     finally:
         try:
-            os.remove(tmp_video)
-        except:
-            pass
-
-        try:
-            os.remove(tmp_audio)
-        except:
-            pass
-
-        try:
-            if tmp_thumbnail:
-                os.remove(tmp_thumbnail)
+            shutil.rmtree(BASE_DIR, ignore_errors=True)
         except:
             pass
