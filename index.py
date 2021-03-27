@@ -425,6 +425,9 @@ if __name__ == "__main__":
                     i += 1
                 elif args[i] == "-d" or args[i] == "--debug":
                     DEBUG = True
+                elif args[i] == "-td" or args[i] == "--temp-dir":
+                    BASE_DIR = args[i+1]
+                    i += 1
                 else:
                     raise KeyError(f"Parameter not recognized: {args[i]}")
                 
