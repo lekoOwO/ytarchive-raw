@@ -373,7 +373,7 @@ if __name__ == "__main__":
     -i, --input [JSON_FILE]     Input JSON file. Do not use with -iv or -ia.
     -iv, --input-video [URL]    Input video URL. Use with -ia.
     -ia, --input-audio [URL]    Input audio URL. Use with -iv.
-    
+
     -o, --output [OUTPUT_FILE]  Output file path. Uses `YYYYMMDD TITLE (VIDEO_ID).mkv` by default.
     -s5, --socks5-proxy [proxy] Socks5 Proxy. No schema should be provided in the proxy url. PySocks should be installed.
     -hp, --http-proxy [proxy]   HTTP Proxy.
@@ -447,6 +447,10 @@ if __name__ == "__main__":
 
         if not BASE_DIR:
             BASE_DIR = tempfile.mkdtemp(prefix="ytarchive_raw.", suffix=f".{input_data['metadata']['id']}" if input_data is not None else None)
+        elif os.path.isdir(BASE_DIR):
+            BASE_DIR = tempfile.mkdtemp(prefix="ytarchive_raw.", suffix=f".{input_data['metadata']['id']}" if input_data is not None else None, dir=BASE_DIR)
+        else:
+            os.makedirs(BASE_DIR)
 
         tmp_video_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".video", dir=BASE_DIR)
         tmp_video = tmp_video_f.name
