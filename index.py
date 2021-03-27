@@ -421,7 +421,7 @@ if __name__ == "__main__":
                     FAIL_THRESHOLD = int(args[i + 1])
                     i += 1
                 elif args[i] == "-p" or args[i] == "--pool":
-                    IP_POOL = int(args[i + 1])
+                    IP_POOL = args[i+1]
                     i += 1
                 elif args[i] == "-d" or args[i] == "--debug":
                     DEBUG = True
