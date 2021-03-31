@@ -1,5 +1,11 @@
 # ytarchive-raw
 
+## Description
+
+This project introduces a new method to grab **Privated**, **Removed** or **any** unavailable YouTube livestreams with prepared metadata files.
+
+Use with [Auto YTA](https://github.com/lekoOwO/auto-ytarchive-raw) prevent any missing livestreams!
+
 ## Dependencies
 
  - ffmpeg
