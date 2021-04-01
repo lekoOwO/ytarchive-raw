@@ -473,17 +473,21 @@ if __name__ == "__main__":
         else:
             os.makedirs(BASE_DIR)
 
-        tmp_video_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".video", dir=BASE_DIR)
-        tmp_video = tmp_video_f.name
-        tmp_video_f.close()
-
-        tmp_audio_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".audio", dir=BASE_DIR)
-        tmp_audio = tmp_audio_f.name
-        tmp_audio_f.close()
+        tmp_video = []
+        tmp_audio = []
 
         for i in range(len(param["iv"])):
-            video_thread = threading.Thread(target=main, args=(param["iv"][i], tmp_video, f"[Video.{i}]", lambda x:print(f"{bcolors.OKBLUE}{x}{bcolors.ENDC}")), daemon=True)
-            audio_thread = threading.Thread(target=main, args=(param["ia"][i], tmp_audio, f"[Audio.{i}]", lambda x:print(f"{bcolors.OKGREEN}{x}{bcolors.ENDC}")), daemon=True)
+            tmp_video_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f".video.{i}", dir=BASE_DIR)
+            tmp_video.append(tmp_video_f.name)
+            tmp_video_f.close()
+
+            tmp_audio_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f".audio.{i}", dir=BASE_DIR)
+            tmp_audio.append(tmp_audio_f.name)
+            tmp_audio_f.close()
+
+        for i in range(len(param["iv"])):
+            video_thread = threading.Thread(target=main, args=(param["iv"][i], tmp_video[i], f"[Video.{i}]", lambda x:print(f"{bcolors.OKBLUE}{x}{bcolors.ENDC}")), daemon=True)
+            audio_thread = threading.Thread(target=main, args=(param["ia"][i], tmp_audio[i], f"[Audio.{i}]", lambda x:print(f"{bcolors.OKGREEN}{x}{bcolors.ENDC}")), daemon=True)
 
             video_thread.start()
             audio_thread.start()
@@ -516,17 +520,58 @@ if __name__ == "__main__":
             ffmpeg_params = " ".join(ffmpeg_params)
         else:
             ffmpeg_params = ""
+
+        if len(tmp_video) == 1:
+            cmd = f"ffmpeg -i '{tmp_video[0]}' -i '{tmp_audio[0]}' -c copy {ffmpeg_params} '{param['output']}'"
+            if DEBUG:
+                print(f"[DEBUG] ffmpeg command: {cmd}")
+            p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out, err = p.communicate()
+
+            if type(out) == bytes:
+                out = out.decode(sys.stdout.encoding)
+            if type(err) == bytes:
+                err = err.decode(sys.stdout.encoding)
+        else:
+            tmp_merged = []
+            out = ""
+            err = ""
+            for i in range(len(param["iv"])):
+                tmp_merged_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f".merged.{i}", dir=BASE_DIR)
+                tmp_merged.append(tmp_merged_f.name)
+                tmp_merged_f.close()
+
+                cmd = f"ffmpeg -i '{tmp_video[i]}' -i '{tmp_audio[i]}' -c copy '{tmp_merged[i]}'"
+                if DEBUG:
+                    print(f"[DEBUG] ffmpeg command merging {i}: {cmd}")
+                p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 
-        cmd = f"ffmpeg -i '{tmp_video}' -i '{tmp_audio}' -c copy {ffmpeg_params} '{param['output']}'"
-        if DEBUG:
-            print(f"[DEBUG] ffmpeg command: {cmd}")
-        p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        out, err = p.communicate()
+                out_i, err_i = p.communicate()
                 
-        if type(out) == bytes:
-            out = out.decode(sys.stdout.encoding)
-        if type(err) == bytes:
-            err = err.decode(sys.stdout.encoding)
+                if type(out_i) == bytes:
+                    out += out_i.decode(sys.stdout.encoding)
+                if type(err_i) == bytes:
+                    err += err_i.decode(sys.stdout.encoding)
+            
+            merged_file_list = ""
+            with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".merged.txt", dir=BASE_DIR) as tmp_file:
+                data = ""
+                for x in tmp_merged:
+                    data += "file '{x}'\n"
+                tmp_file.write(data)
+                merged_file_list = tmp_file.name
+            if os.name == 'nt':
+                cmd = f"ffmpeg -safe 0 -f concat -i '{merged_file_list}'' -c copy {ffmpeg_params} '{param['output']}'"
+            else:
+                cmd = f"ffmpeg -f concat -safe 0 -i '{merged_file_list}'' -c copy {ffmpeg_params} '{param['output']}'"
+            p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+            out_i, err_i = p.communicate()
+
+            if type(out_i) == bytes:
+                out += out_i.decode(sys.stdout.encoding)
+            if type(err_i) == bytes:
+                err += err_i.decode(sys.stdout.encoding)
 
         if len(err):
             print(f"[ERROR] FFmpeg: {err}")
