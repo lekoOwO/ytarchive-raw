@@ -240,7 +240,10 @@ def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
             if DEBUG:
                 print(f"[DEBUG]{log_prefix} Seg {seg} Failed with {e.code}")
             if e.code == 403:
-                openurl(base_url)
+                try:
+                    openurl(base_url)
+                except urllib.error.HTTPError as e2:
+                    return False
             return False
 
         except http.client.IncompleteRead as e:
