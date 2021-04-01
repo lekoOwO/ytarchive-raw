@@ -228,10 +228,12 @@ def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
     target_url_with_header = urllib.request.Request(target_url, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36"
     })
+
+    incomplete_read_retry = 0
     while True:
         try:
             with openurl(target_url_with_header) as response:
-                with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f"{seg}.seg", dir=BASE_DIR) as tmp_file:
+                with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f".{seg}.seg", dir=BASE_DIR) as tmp_file:
                     shutil.copyfileobj(response, tmp_file)
                     seg_status.segs[seg] = tmp_file.name
                 return True
@@ -247,7 +249,7 @@ def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
             return False
 
         except http.client.IncompleteRead as e:
-            continue
+            return False
 
 def merge_segs(target_file, seg_status):
     while seg_status.end_seg is None or seg_status.merged_seg != seg_status.end_seg:
@@ -537,13 +539,12 @@ if __name__ == "__main__":
             out = ""
             err = ""
             for i in range(len(param["iv"])):
-                tmp_merged_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f".merged.{i}", dir=BASE_DIR)
-                tmp_merged.append(tmp_merged_f.name)
-                tmp_merged_f.close()
+                with tempfile.NamedTemporaryFile(prefix="ytarchive_raw.", suffix=f".merged.{i}.mkv", dir=BASE_DIR) as tmp_merged_f:
+                    tmp_merged.append(tmp_merged_f.name)
 
                 cmd = f"ffmpeg -i '{tmp_video[i]}' -i '{tmp_audio[i]}' -c copy '{tmp_merged[i]}'"
                 if DEBUG:
-                    print(f"[DEBUG] ffmpeg command merging {i}: {cmd}")
+                    print(f"[DEBUG] ffmpeg command merging [{i}]: {cmd}")
                 p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 
                 out_i, err_i = p.communicate()
@@ -554,16 +555,17 @@ if __name__ == "__main__":
                     err += err_i.decode(sys.stdout.encoding)
             
             merged_file_list = ""
-            with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".merged.txt", dir=BASE_DIR) as tmp_file:
-                data = ""
+            with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=".merged.txt", dir=BASE_DIR, encoding='utf-8', mode='w+') as tmp_file:
+                data = []
                 for x in tmp_merged:
-                    data += "file '{x}'\n"
+                    data.append(f"file '{x}'")
+                data = "\n".join(data)
                 tmp_file.write(data)
                 merged_file_list = tmp_file.name
             if os.name == 'nt':
-                cmd = f"ffmpeg -safe 0 -f concat -i '{merged_file_list}'' -c copy {ffmpeg_params} '{param['output']}'"
+                cmd = f"ffmpeg -safe 0 -f concat -i '{merged_file_list}' -c copy {ffmpeg_params} '{param['output']}'"
             else:
-                cmd = f"ffmpeg -f concat -safe 0 -i '{merged_file_list}'' -c copy {ffmpeg_params} '{param['output']}'"
+                cmd = f"ffmpeg -f concat -safe 0 -i '{merged_file_list}' -c copy {ffmpeg_params} '{param['output']}'"
             p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             out_i, err_i = p.communicate()
