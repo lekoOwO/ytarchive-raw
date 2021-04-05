@@ -524,7 +524,7 @@ if __name__ == "__main__":
             ffmpeg_params = ""
 
         if len(tmp_video) == 1:
-            cmd = f"ffmpeg -i '{tmp_video[0]}' -i '{tmp_audio[0]}' -c copy {ffmpeg_params} '{param['output']}'"
+            cmd = f"ffmpeg -y -i '{tmp_video[0]}' -i '{tmp_audio[0]}' -c copy {ffmpeg_params} '{param['output']}'"
             if DEBUG:
                 print(f"[DEBUG] ffmpeg command: {cmd}")
             p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -542,7 +542,7 @@ if __name__ == "__main__":
                 with tempfile.NamedTemporaryFile(prefix="ytarchive_raw.", suffix=f".merged.{i}.mkv", dir=BASE_DIR) as tmp_merged_f:
                     tmp_merged.append(tmp_merged_f.name)
 
-                cmd = f"ffmpeg -i '{tmp_video[i]}' -i '{tmp_audio[i]}' -c copy '{tmp_merged[i]}'"
+                cmd = f"ffmpeg -y -i '{tmp_video[i]}' -i '{tmp_audio[i]}' -c copy '{tmp_merged[i]}'"
                 if DEBUG:
                     print(f"[DEBUG] ffmpeg command merging [{i}]: {cmd}")
                 p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -563,9 +563,9 @@ if __name__ == "__main__":
                 tmp_file.write(data)
                 merged_file_list = tmp_file.name
             if os.name == 'nt':
-                cmd = f"ffmpeg -safe 0 -f concat -i '{merged_file_list}' -c copy {ffmpeg_params} '{param['output']}'"
+                cmd = f"ffmpeg -y -safe 0 -f concat -i '{merged_file_list}' -c copy {ffmpeg_params} '{param['output']}'"
             else:
-                cmd = f"ffmpeg -f concat -safe 0 -i '{merged_file_list}' -c copy {ffmpeg_params} '{param['output']}'"
+                cmd = f"ffmpeg -y -f concat -safe 0 -i '{merged_file_list}' -c copy {ffmpeg_params} '{param['output']}'"
             p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             out_i, err_i = p.communicate()
