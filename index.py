@@ -47,6 +47,19 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
+def debug(x):
+    if DEBUG:
+        print(f"[DEBUG] {x}")
+
+def warn(x):
+    print(f"{bcolors.WARNING}[WARN] {x}{bcolors.ENDC}")
+
+def info(x):
+    print(f"[INFO] {x}")
+
+def error(x):
+    print(f"{bcolors.FAIL}[ERROR] {x}{bcolors.ENDC}")
+
 class ProgressBar:
     def __init__(self, total, print=print):
         self.total = total
@@ -117,9 +130,9 @@ class SegmentStatus:
         self.segs = {}
         self.merged_seg = -1
 
-        print(f"[INFO]{log_prefix} Try getting total segments...")
+        info(f"{log_prefix} Try getting total segments...")
         self.end_seg = get_total_segment(url)
-        print(f"[INFO]{log_prefix} Total segments: {self.end_seg}")
+        info(f"{log_prefix} Total segments: {self.end_seg}")
 
         self.seg_groups = []
 
@@ -198,8 +211,7 @@ def openurl(url, retry=0, source_address="random"):
             if not is_ip(source_address):
                 source_address = None
             if source_address:
-                if DEBUG:
-                    print(f"Using IP: {source_address}")
+                debug(f"Using IP: {source_address}")
                 if type(url) == str:
                     schema = urllib.parse.urlsplit(url).scheme
                 elif isinstance(url, urllib.request.Request):
@@ -239,8 +251,7 @@ def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
                 return True
                 
         except urllib.error.HTTPError as e:
-            if DEBUG:
-                print(f"[DEBUG]{log_prefix} Seg {seg} Failed with {e.code}")
+            debug(f"{log_prefix} Seg {seg} Failed with {e.code}")
             if e.code == 403:
                 try:
                     openurl(base_url)
@@ -283,12 +294,10 @@ def download_seg_group(url, seg_group_index, seg_status, log_prefix="", print=pr
     try:
         while True:
             if fail_count < FAIL_THRESHOLD:
-                if DEBUG:
-                    print(f"[DEBUG]{log_prefix} Current Seg: {seg}")
+                debug(f"{log_prefix} Current Seg: {seg}")
                 status = download_segment(url, seg, seg_status, log_prefix, print)
                 if status:
-                    if DEBUG:
-                        print(f"[DEBUG]{log_prefix} Success Seg: {seg}")
+                    debug(f"{log_prefix} Success Seg: {seg}")
                     if seg == seg_range[1]:
                         return True
                     post_dl_seg(seg)
@@ -296,12 +305,10 @@ def download_seg_group(url, seg_group_index, seg_status, log_prefix="", print=pr
                     fail_count = 0
                 else:
                     fail_count += 1
-                    if DEBUG:
-                        print(f"[DEBUG]{log_prefix} Failed Seg: {seg} [{fail_count}/{FAIL_THRESHOLD}]")
+                    debug(f"{log_prefix} Failed Seg: {seg} [{fail_count}/{FAIL_THRESHOLD}]")
                     time.sleep(1)
             else:
-                if DEBUG:
-                    print(f"[DEBUG]{log_prefix} Giving up seg: {seg}")
+                warn(f"{log_prefix} Giving up seg: {seg}")
                 if seg == seg_range[1]:
                     return True
                 seg_status.segs[seg] = None # Skip this seg
@@ -499,8 +506,7 @@ if __name__ == "__main__":
             while audio_thread.is_alive():
                 audio_thread.join(0.5)
 
-        if DEBUG:
-            print("[DEBUG] Download finished. Merging...")
+        debug("Download finished. Merging...")
 
         if input_data is not None:
             tmp_thumbnail = None
@@ -525,8 +531,7 @@ if __name__ == "__main__":
 
         if len(tmp_video) == 1:
             cmd = f"ffmpeg -y -i '{tmp_video[0]}' -i '{tmp_audio[0]}' -c copy {ffmpeg_params} '{param['output']}'"
-            if DEBUG:
-                print(f"[DEBUG] ffmpeg command: {cmd}")
+            debug(f"ffmpeg command: {cmd}")
             p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             out, err = p.communicate()
 
@@ -543,8 +548,7 @@ if __name__ == "__main__":
                     tmp_merged.append(tmp_merged_f.name)
 
                 cmd = f"ffmpeg -y -i '{tmp_video[i]}' -i '{tmp_audio[i]}' -c copy '{tmp_merged[i]}'"
-                if DEBUG:
-                    print(f"[DEBUG] ffmpeg command merging [{i}]: {cmd}")
+                debug(f"ffmpeg command merging [{i}]: {cmd}")
                 p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 
                 out_i, err_i = p.communicate()
@@ -576,10 +580,10 @@ if __name__ == "__main__":
                 err += err_i.decode(sys.stdout.encoding)
 
         if len(err):
-            print(f"[ERROR] FFmpeg: {err}")
+            error(f"FFmpeg: {err}")
 
     except KeyboardInterrupt as e:
-        print("Program stopped.")
+        info("Program stopped.")
 
     finally:
         try:
