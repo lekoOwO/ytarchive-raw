@@ -464,7 +464,7 @@ if __name__ == "__main__":
             if param["output"] is None:
                 if input_data is not None:
                     try:
-                        param["output"] = f"{date.today().strftime('%Y%m%d')} {sanitize_filename(input_data['metadata']['title'])} ({input_data['metadata']['id']}).mkv".replace("'", "\\'")
+                        param["output"] = f"{date.today().strftime('%Y%m%d')} {sanitize_filename(input_data['metadata']['title'])} ({input_data['metadata']['id']}).mkv"
                     except Exception as e:
                         raise RuntimeError("JSON Version should be > 1.0, please update to the latest grabber.")
                 else:
