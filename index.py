@@ -8,7 +8,6 @@ import threading
 import os
 import tempfile
 import subprocess
-import shlex
 from datetime import date
 import re
 import itertools
@@ -379,6 +378,8 @@ if __name__ == "__main__":
     import sys
     import pathlib
 
+    os.system("")  # enable colors on windows
+
     try:
         # Parse params
 
@@ -463,7 +464,7 @@ if __name__ == "__main__":
             if param["output"] is None:
                 if input_data is not None:
                     try:
-                        param["output"] = f"{date.today().strftime('%Y%m%d')} {sanitize_filename(input_data['metadata']['title'])} ({input_data['metadata']['id']}).mkv".replace("'", "\\'")
+                        param["output"] = f"{date.today().strftime('%Y%m%d')} {sanitize_filename(input_data['metadata']['title'])} ({input_data['metadata']['id']}).mkv"
                     except Exception as e:
                         raise RuntimeError("JSON Version should be > 1.0, please update to the latest grabber.")
                 else:
@@ -508,6 +509,7 @@ if __name__ == "__main__":
 
         debug("Download finished. Merging...")
 
+        ffmpeg_params = []
         if input_data is not None:
             tmp_thumbnail = None
             with urllib.request.urlopen(input_data['metadata']["thumbnail"]) as response:
@@ -516,23 +518,20 @@ if __name__ == "__main__":
                     tmp_thumbnail = tmp_file.name
             
             ffmpeg_params = [
-                "-metadata", f"title=\"{input_data['metadata']['title']}\"",
-                "-metadata", f"comment=\"{input_data['metadata']['description']}\"",
-                "-metadata", f"author=\"{input_data['metadata']['channelName']}\"",
-                "-metadata", f"episode_id=\"{input_data['metadata']['id']}\"",
+                "-metadata", 'title="{}"'.format(input_data['metadata']['title'].replace('"', "''")),
+                "-metadata", 'comment="{}"'.format(input_data['metadata']['description'].replace('"', "''")),
+                "-metadata", 'author="{}"'.format(input_data['metadata']['channelName'].replace('"', "''")),
+                "-metadata", 'episode_id="{}"'.format(input_data['metadata']['id'].replace('"', "''")),
 
-                "-attach", f"'{tmp_thumbnail}'", 
+                "-attach", tmp_thumbnail, 
                 "-metadata:s:t", "mimetype=image/jpeg", 
                 "-metadata:s:t", "filename=\"thumbnail.jpg\""
             ]
-            ffmpeg_params = " ".join(ffmpeg_params)
-        else:
-            ffmpeg_params = ""
 
         if len(tmp_video) == 1:
-            cmd = f"ffmpeg -y -i '{tmp_video[0]}' -i '{tmp_audio[0]}' -c copy {ffmpeg_params} '{param['output']}'"
+            cmd = ["ffmpeg", "-y", "-i", tmp_video[0], "-i", tmp_audio[0], "-c", "copy"] + ffmpeg_params + [param['output']]
             debug(f"ffmpeg command: {cmd}")
-            p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             out, err = p.communicate()
 
             if type(out) == bytes:
@@ -547,9 +546,9 @@ if __name__ == "__main__":
                 with tempfile.NamedTemporaryFile(prefix="ytarchive_raw.", suffix=f".merged.{i}.mkv", dir=BASE_DIR) as tmp_merged_f:
                     tmp_merged.append(tmp_merged_f.name)
 
-                cmd = f"ffmpeg -y -i '{tmp_video[i]}' -i '{tmp_audio[i]}' -c copy '{tmp_merged[i]}'"
+                cmd = ["ffmpeg", "-y", "-i", tmp_video[i], "-i", tmp_audio[i], "-c", "copy", tmp_merged[i]]
                 debug(f"ffmpeg command merging [{i}]: {cmd}")
-                p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 
                 out_i, err_i = p.communicate()
                 
@@ -567,10 +566,12 @@ if __name__ == "__main__":
                 tmp_file.write(data)
                 merged_file_list = tmp_file.name
             if os.name == 'nt':
-                cmd = f"ffmpeg -y -safe 0 -f concat -i '{merged_file_list}' -c copy {ffmpeg_params} '{param['output']}'"
+                cmd = ["ffmpeg", "-y", "-safe", "0", "-f", "concat"]
             else:
-                cmd = f"ffmpeg -y -f concat -safe 0 -i '{merged_file_list}' -c copy {ffmpeg_params} '{param['output']}'"
-            p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0"]
+            
+            cmd += ["-i", merged_file_list, "-c", "copy"] + ffmpeg_params + [param['output']]
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             out_i, err_i = p.communicate()
 
