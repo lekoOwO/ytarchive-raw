@@ -22,6 +22,7 @@ SLEEP_AFTER_FETCH_FREG = 0
 DEBUG = False
 THREADS = 1
 IP_POOL = None
+HTTP_TIMEOUT = 5
 
 BASE_DIR = None
 
@@ -151,7 +152,8 @@ class BoundHTTPHandler(urllib.request.HTTPHandler):
     def __init__(self, *args, source_address=None, **kwargs):
         urllib.request.HTTPHandler.__init__(self, *args, **kwargs)
         self.http_class = functools.partial(http.client.HTTPConnection,
-                source_address=source_address)
+                source_address=source_address,
+                timeout=HTTP_TIMEOUT)
 
     def http_open(self, req):
         return self.do_open(self.http_class, req)
@@ -160,7 +162,8 @@ class BoundHTTPSHandler(urllib.request.HTTPSHandler):
     def __init__(self, *args, source_address=None, **kwargs):
         urllib.request.HTTPSHandler.__init__(self, *args, **kwargs)
         self.https_class = functools.partial(http.client.HTTPSConnection,
-                source_address=source_address)
+                source_address=source_address,
+                timeout=HTTP_TIMEOUT)
 
     def https_open(self, req):
         return self.do_open(self.https_class, req,
