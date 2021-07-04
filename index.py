@@ -15,6 +15,7 @@ import traceback
 import functools
 import random
 import ipaddress
+import socket
 
 FAIL_THRESHOLD = 20
 RETRY_THRESHOLD = 3
@@ -34,6 +35,8 @@ PBAR_PRINT_INTERVAL = 5
 ACCENT_CHARS = dict(zip('ÂÃÄÀÁÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖŐØŒÙÚÛÜŰÝÞßàáâãäåæçèéêëìíîïðñòóôõöőøœùúûüűýþÿ',
                         itertools.chain('AAAAAA', ['AE'], 'CEEEEIIIIDNOOOOOOO', ['OE'], 'UUUUUY', ['TH', 'ss'],
                                         'aaaaaa', ['ae'], 'ceeeeiiiionooooooo', ['oe'], 'uuuuuy', ['th'], 'y')))
+
+socket.setdefaulttimeout(HTTP_TIMEOUT)
 
 # Beautiful stuff
 class bcolors:
