@@ -226,7 +226,7 @@ def openurl(url, retry=0, source_address="random"):
                 return urllib.request.build_opener(handler).open(url)
             else:
                 return urllib.request.urlopen(url)
-    except http.client.IncompleteRead as e:
+    except (http.client.IncompleteRead, socket.timeout) as e:
         if retry >= RETRY_THRESHOLD:
             raise e
         else:
@@ -264,7 +264,7 @@ def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
                     return False
             return False
 
-        except http.client.IncompleteRead as e:
+        except (http.client.IncompleteRead, socket.timeout) as e:
             return False
 
 def merge_segs(target_file, seg_status):
