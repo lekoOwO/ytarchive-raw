@@ -204,6 +204,10 @@ def get_pool_ip():
 
 ## IP Pool end
 
+def readfile(filepath, encoding="utf-8"):
+    with open(filepath, "r", encoding=encoding) as f:
+        return f.read()
+
 def openurl(url, retry=0, source_address="random"):
     global opener
 
@@ -534,11 +538,23 @@ if __name__ == "__main__":
                 "-metadata:s:t", "filename=\"thumbnail.jpg\""
             ]
 
+        # have FFmpeg write the full log to a tempfile, in addition to the terse log on stdout/stderr.
+        # The logfile will be overwritten every time so we'll keep appending the contents to ff_logtext
+        with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f".ffmpeg.log", dir=BASE_DIR) as tmp_file:
+            ff_logpath = tmp_file.name
+            ff_logpath_esc = ff_logpath.replace("\\", "\\\\").replace(":", "\\")
+        
+        ff_logtext = ""
+        ff_env = os.environ.copy()
+        ff_env["FFREPORT"] = f"file={ff_logpath_esc}:level=32"  # 32=info/normal
+
         if len(tmp_video) == 1:
-            cmd = ["ffmpeg", "-y", "-i", tmp_video[0], "-i", tmp_audio[0], "-c", "copy"] + ffmpeg_params + [param['output']]
+            cmd = ["ffmpeg", "-y", "-v", "warning", "-i", tmp_video[0], "-i", tmp_audio[0], "-c", "copy"] + ffmpeg_params + [param['output']]
             debug(f"ffmpeg command: {cmd}")
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env)
             out, err = p.communicate()
+            retcode = p.returncode
+            ff_logtext += readfile(ff_logpath)
 
             if type(out) == bytes:
                 out = out.decode(sys.stdout.encoding)
@@ -548,15 +564,18 @@ if __name__ == "__main__":
             tmp_merged = []
             out = ""
             err = ""
+            retcode = 0
             for i in range(len(param["iv"])):
                 with tempfile.NamedTemporaryFile(prefix="ytarchive_raw.", suffix=f".merged.{i}.mkv", dir=BASE_DIR) as tmp_merged_f:
                     tmp_merged.append(tmp_merged_f.name)
 
-                cmd = ["ffmpeg", "-y", "-i", tmp_video[i], "-i", tmp_audio[i], "-c", "copy", tmp_merged[i]]
+                cmd = ["ffmpeg", "-y", "-v", "warning", "-i", tmp_video[i], "-i", tmp_audio[i], "-c", "copy", tmp_merged[i]]
                 debug(f"ffmpeg command merging [{i}]: {cmd}")
-                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env)
                 
                 out_i, err_i = p.communicate()
+                retcode = retcode or p.returncode
+                ff_logtext += readfile(ff_logpath)
                 
                 if type(out_i) == bytes:
                     out += out_i.decode(sys.stdout.encoding)
@@ -576,8 +595,10 @@ if __name__ == "__main__":
             else:
                 cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0"]
             
-            cmd += ["-i", merged_file_list, "-c", "copy"] + ffmpeg_params + [param['output']]
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            cmd += ["-v", "warning", "-i", merged_file_list, "-c", "copy"] + ffmpeg_params + [param['output']]
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env)
+            retcode = retcode or p.returncode
+            ff_logtext += readfile(ff_logpath)
 
             out_i, err_i = p.communicate()
 
@@ -586,9 +607,26 @@ if __name__ == "__main__":
             if type(err_i) == bytes:
                 err += err_i.decode(sys.stdout.encoding)
 
-        if len(err):
-            error(f"FFmpeg: {err}")
+        debug(f"FFmpeg complete log:\n{ff_logtext}\n")
 
+        # remove harmless warnings
+        err = err.split('\n')
+        for ignore in [
+            "    Last message repeated ",
+            "Found duplicated MOOV Atom. Skipped it",
+            "Found unknown-length element with ID 0x18538067 at pos."  # segment header
+        ]:
+            err = [x for x in err if ignore not in x]
+        err = '\n'.join(err)
+
+        if retcode:
+            error(f"FFmpeg complete log:\n{ff_logtext}\n")
+            error(f"FFmpeg:\n{err}\n\nFailed with error {retcode}")
+        elif err:
+            warn(f"FFmpeg:\n{err}\n\nSuccess, but with warnings")
+        else:
+            info("All good!")
+    
     except KeyboardInterrupt as e:
         info("Program stopped.")
 
