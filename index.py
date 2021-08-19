@@ -16,6 +16,7 @@ import functools
 import random
 import ipaddress
 import socket
+import multiprocessing.pool
 
 FAIL_THRESHOLD = 20
 RETRY_THRESHOLD = 3
@@ -38,7 +39,7 @@ ACCENT_CHARS = dict(zip('ÂÃÄÀÁÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖŐØŒÙ�
 
 socket.setdefaulttimeout(HTTP_TIMEOUT)
 
-# Beautiful stuff
+##### Beautiful stuff #####
 class bcolors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -89,7 +90,7 @@ class ProgressBar:
             bar += PBAR_SYMBOL if x[1] else PBAR_EMPTY_SYMBOL
         self.print(bar, self.finished / self.total)
 
-# Beautiful stuff end
+##### - Beautiful stuff - #####
 global opener
 opener = None
 
@@ -128,8 +129,9 @@ def get_total_segment(url):
     except urllib.error.HTTPError as e:
         headers = e.headers
     return int(headers["x-head-seqnum"])
+
 class SegmentStatus:
-    def __init__(self, url, log_prefix="", print=print):
+    def __init__(self, url, log_prefix=""):
         self.segs = {}
         self.merged_seg = -1
 
@@ -208,8 +210,15 @@ def readfile(filepath, encoding="utf-8"):
     with open(filepath, "r", encoding=encoding) as f:
         return f.read()
 
+@timeout(HTTP_TIMEOUT + 1)
 def openurl(url, retry=0, source_address="random"):
     global opener
+
+    def error_handle(e):
+        if retry >= RETRY_THRESHOLD:
+            raise e
+        else:
+            return openurl(url, retry+1, source_address)
 
     try:
         if opener:
@@ -231,17 +240,14 @@ def openurl(url, retry=0, source_address="random"):
             else:
                 return urllib.request.urlopen(url)
     except (http.client.IncompleteRead, socket.timeout) as e:
-        if retry >= RETRY_THRESHOLD:
-            raise e
-        else:
-            return openurl(url, retry+1, source_address)
+        error_handle(e)
     except urllib.error.HTTPError as e:
         raise e
     except urllib.error.URLError as e:
-        if retry >= RETRY_THRESHOLD:
-            raise e
-        else:
-            return openurl(url, retry+1, source_address)
+        error_handle(e)
+    except:
+        error_handle(e)
+
 
 def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
     target_url = get_seg_url(base_url, seg)
@@ -268,13 +274,17 @@ def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
                     return False
             return False
 
-        except (http.client.IncompleteRead, socket.timeout) as e:
+        except (http.client.IncompleteRead, socket.timeout, TimeoutError) as e: # TimeoutError by @timeout decorator.
             return False
 
-def merge_segs(target_file, seg_status):
-    while seg_status.end_seg is None or seg_status.merged_seg != seg_status.end_seg:
+        except:
+            return False
+
+def merge_segs(target_file, seg_status, not_merged_segs=[]):
+    while seg_status.merged_seg != seg_status.end_seg:
         if (seg_status.merged_seg + 1) not in seg_status.segs:
-            time.sleep(0.1)
+            debug(f"Waiting for Segment {seg_status.merged_seg + 1} ready for merging...")
+            time.sleep(1)
             continue
         
         if seg_status.segs[seg_status.merged_seg + 1] is not None:
@@ -291,6 +301,8 @@ def merge_segs(target_file, seg_status):
                 os.remove(seg_status.segs[seg_status.merged_seg + 1])
             except:
                 pass
+        else:
+            not_merged_segs.append(seg_status.merged_seg + 1)
 
         seg_status.merged_seg += 1
         seg_status.segs.pop(seg_status.merged_seg)
@@ -330,11 +342,11 @@ def download_seg_group(url, seg_group_index, seg_status, log_prefix="", print=pr
         sys.exit(1)
 
 
-def main(url, target_file, log_prefix="", print=print):
-    seg_status = SegmentStatus(url, log_prefix, print)
+def main(url, target_file, not_merged_segs=[], log_prefix="", print=print):
+    seg_status = SegmentStatus(url, log_prefix)
     pbar = ProgressBar(seg_status.end_seg, lambda bar,p: print(f"{log_prefix}: |{bar}| {'{:.2f}'.format(p*100)}%"))
 
-    merge_thread = threading.Thread(target=merge_segs, args=(target_file, seg_status), daemon=True)
+    merge_thread = threading.Thread(target=merge_segs, args=(target_file, seg_status, not_merged_segs), daemon=True)
     merge_thread.start()
 
     for i in range(len(seg_status.seg_groups)):
@@ -382,6 +394,20 @@ def sanitize_filename(s, restricted=False, is_id=False):
         if not result:
             result = '_'
     return result
+
+def timeout(max_timeout):
+    """Timeout decorator, parameter in seconds."""
+    def timeout_decorator(item):
+        """Wrap the original function."""
+        @functools.wraps(item)
+        def func_wrapper(*args, **kwargs):
+            """Closure for function."""
+            pool = multiprocessing.pool.ThreadPool(processes=1)
+            async_result = pool.apply_async(item, args, kwargs)
+            # raises a TimeoutError if execution exceeds max_timeout
+            return async_result.get(max_timeout)
+        return func_wrapper
+    return timeout_decorator
 # ===== utils end =====
 
 if __name__ == "__main__":
@@ -396,7 +422,8 @@ if __name__ == "__main__":
         param = {
             "output": None,
             "iv": [],
-            "ia": []
+            "ia": [],
+            "delete_tmp": True
         }
 
         input_data = None
@@ -420,6 +447,7 @@ if __name__ == "__main__":
     -p, --pool [FILE]           IP Pool file.
     -td, --temp-dir [DIR]       Temp file dir.
     -d, --debug                 Enable debug mode.
+    -D, --dont-delete-tmp       Do not delete temp folder.
                     """)
                     sys.exit()
                 if args[i] == "-i" or args[i] == "--input":
@@ -466,6 +494,8 @@ if __name__ == "__main__":
                 elif args[i] == "-td" or args[i] == "--temp-dir":
                     BASE_DIR = args[i+1]
                     i += 1
+                elif args[i] == "-D" or args[i] == "--dont-delete-tmp":
+                    param["delete_tmp"] = False
                 else:
                     raise KeyError(f"Parameter not recognized: {args[i]}")
                 
@@ -495,6 +525,8 @@ if __name__ == "__main__":
 
         tmp_video = []
         tmp_audio = []
+        video_not_merged_segs = []
+        audio_not_merged_segs = []
 
         for i in range(len(param["iv"])):
             tmp_video_f = tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f".video.{i}", dir=BASE_DIR)
@@ -506,8 +538,8 @@ if __name__ == "__main__":
             tmp_audio_f.close()
 
         for i in range(len(param["iv"])):
-            video_thread = threading.Thread(target=main, args=(param["iv"][i], tmp_video[i], f"[Video.{i}]", lambda x:print(f"{bcolors.OKBLUE}{x}{bcolors.ENDC}")), daemon=True)
-            audio_thread = threading.Thread(target=main, args=(param["ia"][i], tmp_audio[i], f"[Audio.{i}]", lambda x:print(f"{bcolors.OKGREEN}{x}{bcolors.ENDC}")), daemon=True)
+            video_thread = threading.Thread(target=main, args=(param["iv"][i], tmp_video[i], video_not_merged_segs, f"[Video.{i}]", lambda x:print(f"{bcolors.OKBLUE}{x}{bcolors.ENDC}")), daemon=True)
+            audio_thread = threading.Thread(target=main, args=(param["ia"][i], tmp_audio[i], audio_not_merged_segs, f"[Audio.{i}]", lambda x:print(f"{bcolors.OKGREEN}{x}{bcolors.ENDC}")), daemon=True)
 
             video_thread.start()
             audio_thread.start()
@@ -517,7 +549,12 @@ if __name__ == "__main__":
             while audio_thread.is_alive():
                 audio_thread.join(0.5)
 
-        debug("Download finished. Merging...")
+        if len(video_not_merged_segs):
+            warn(f"Gived up video segments: {video_not_merged_segs}")
+        if len(audio_not_merged_segs):
+            warn(f"Gived up audio segments: {audio_not_merged_segs}")
+            
+        info("Download finished. Merging...")
 
         ffmpeg_params = []
         if input_data is not None:
@@ -632,6 +669,7 @@ if __name__ == "__main__":
 
     finally:
         try:
-            shutil.rmtree(BASE_DIR, ignore_errors=True)
+            if param["delete_tmp"]:
+                shutil.rmtree(BASE_DIR, ignore_errors=True)
         except:
             pass
