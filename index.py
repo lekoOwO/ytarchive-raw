@@ -39,6 +39,62 @@ ACCENT_CHARS = dict(zip('ÂÃÄÀÁÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖŐØŒÙ�
 
 socket.setdefaulttimeout(HTTP_TIMEOUT)
 
+# ===== utils =====
+def sanitize_filename(s, restricted=False, is_id=False):
+    """Sanitizes a string so it could be used as part of a filename.
+    If restricted is set, use a stricter subset of allowed characters.
+    Set is_id if this is not an arbitrary string, but an ID that should be kept
+    if possible.
+    """
+    def replace_insane(char):
+        if restricted and char in ACCENT_CHARS:
+            return ACCENT_CHARS[char]
+        if char == '?' or ord(char) < 32 or ord(char) == 127:
+            return ''
+        elif char == '"':
+            return '' if restricted else '\''
+        elif char == ':':
+            return '_-' if restricted else ' -'
+        elif char in '\\/|*<>':
+            return '_'
+        if restricted and (char in '!&\'()[]{}$;`^,#' or char.isspace()):
+            return '_'
+        if restricted and ord(char) > 127:
+            return '_'
+        return char
+
+    # Handle timestamps
+    s = re.sub(r'[0-9]+(?::[0-9]+)+', lambda m: m.group(0).replace(':', '_'), s)
+    result = ''.join(map(replace_insane, s))
+    if not is_id:
+        while '__' in result:
+            result = result.replace('__', '_')
+        result = result.strip('_')
+        # Common case of "Foreign band name - English song title"
+        if restricted and result.startswith('-_'):
+            result = result[2:]
+        if result.startswith('-'):
+            result = '_' + result[len('-'):]
+        result = result.lstrip('.')
+        if not result:
+            result = '_'
+    return result
+
+def timeout(max_timeout):
+    """Timeout decorator, parameter in seconds."""
+    def timeout_decorator(item):
+        """Wrap the original function."""
+        @functools.wraps(item)
+        def func_wrapper(*args, **kwargs):
+            """Closure for function."""
+            pool = multiprocessing.pool.ThreadPool(processes=1)
+            async_result = pool.apply_async(item, args, kwargs)
+            # raises a TimeoutError if execution exceeds max_timeout
+            return async_result.get(max_timeout)
+        return func_wrapper
+    return timeout_decorator
+# ===== utils end =====
+
 ##### Beautiful stuff #####
 class bcolors:
     HEADER = '\033[95m'
@@ -354,62 +410,6 @@ def main(url, target_file, not_merged_segs=[], log_prefix="", print=print):
 
     merge_thread.join() # Wait for merge finished
 
-# ===== utils =====
-def sanitize_filename(s, restricted=False, is_id=False):
-    """Sanitizes a string so it could be used as part of a filename.
-    If restricted is set, use a stricter subset of allowed characters.
-    Set is_id if this is not an arbitrary string, but an ID that should be kept
-    if possible.
-    """
-    def replace_insane(char):
-        if restricted and char in ACCENT_CHARS:
-            return ACCENT_CHARS[char]
-        if char == '?' or ord(char) < 32 or ord(char) == 127:
-            return ''
-        elif char == '"':
-            return '' if restricted else '\''
-        elif char == ':':
-            return '_-' if restricted else ' -'
-        elif char in '\\/|*<>':
-            return '_'
-        if restricted and (char in '!&\'()[]{}$;`^,#' or char.isspace()):
-            return '_'
-        if restricted and ord(char) > 127:
-            return '_'
-        return char
-
-    # Handle timestamps
-    s = re.sub(r'[0-9]+(?::[0-9]+)+', lambda m: m.group(0).replace(':', '_'), s)
-    result = ''.join(map(replace_insane, s))
-    if not is_id:
-        while '__' in result:
-            result = result.replace('__', '_')
-        result = result.strip('_')
-        # Common case of "Foreign band name - English song title"
-        if restricted and result.startswith('-_'):
-            result = result[2:]
-        if result.startswith('-'):
-            result = '_' + result[len('-'):]
-        result = result.lstrip('.')
-        if not result:
-            result = '_'
-    return result
-
-def timeout(max_timeout):
-    """Timeout decorator, parameter in seconds."""
-    def timeout_decorator(item):
-        """Wrap the original function."""
-        @functools.wraps(item)
-        def func_wrapper(*args, **kwargs):
-            """Closure for function."""
-            pool = multiprocessing.pool.ThreadPool(processes=1)
-            async_result = pool.apply_async(item, args, kwargs)
-            # raises a TimeoutError if execution exceeds max_timeout
-            return async_result.get(max_timeout)
-        return func_wrapper
-    return timeout_decorator
-# ===== utils end =====
-
 if __name__ == "__main__":
     import sys
     import pathlib
@@ -553,7 +553,7 @@ if __name__ == "__main__":
             warn(f"Gived up video segments: {video_not_merged_segs}")
         if len(audio_not_merged_segs):
             warn(f"Gived up audio segments: {audio_not_merged_segs}")
-            
+
         info("Download finished. Merging...")
 
         ffmpeg_params = []
