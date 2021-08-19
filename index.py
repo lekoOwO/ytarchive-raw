@@ -336,10 +336,10 @@ def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
         except:
             return False
 
-def merge_segs(target_file, seg_status, not_merged_segs=[]):
+def merge_segs(target_file, seg_status, not_merged_segs=[], log_prefix=""):
     while seg_status.merged_seg != seg_status.end_seg:
         if (seg_status.merged_seg + 1) not in seg_status.segs:
-            debug(f"Waiting for Segment {seg_status.merged_seg + 1} ready for merging...")
+            debug(f"{log_prefix} Waiting for Segment {seg_status.merged_seg + 1} ready for merging...")
             time.sleep(1)
             continue
         
@@ -402,7 +402,7 @@ def main(url, target_file, not_merged_segs=[], log_prefix="", print=print):
     seg_status = SegmentStatus(url, log_prefix)
     pbar = ProgressBar(seg_status.end_seg, lambda bar,p: print(f"{log_prefix}: |{bar}| {'{:.2f}'.format(p*100)}%"))
 
-    merge_thread = threading.Thread(target=merge_segs, args=(target_file, seg_status, not_merged_segs), daemon=True)
+    merge_thread = threading.Thread(target=merge_segs, args=(target_file, seg_status, not_merged_segs, log_prefix), daemon=True)
     merge_thread.start()
 
     for i in range(len(seg_status.seg_groups)):
