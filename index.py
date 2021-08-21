@@ -301,40 +301,39 @@ def openurl(url, retry=0, source_address="random"):
         raise e
     except urllib.error.URLError as e:
         error_handle(e)
-    except:
+    except Exception as e:
         error_handle(e)
 
 
-def download_segment(base_url, seg, seg_status, log_prefix="", print=print):
+@timeout(HTTP_TIMEOUT * (RETRY_THRESHOLD + 1))
+def download_segment(base_url, seg, seg_status, log_prefix=""):
     target_url = get_seg_url(base_url, seg)
 
     target_url_with_header = urllib.request.Request(target_url, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36"
     })
 
-    incomplete_read_retry = 0
-    while True:
-        try:
-            with openurl(target_url_with_header) as response:
-                with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f".{seg}.seg", dir=BASE_DIR) as tmp_file:
-                    shutil.copyfileobj(response, tmp_file)
-                    seg_status.segs[seg] = tmp_file.name
-                return True
+    try:
+        with openurl(target_url_with_header) as response:
+            with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f".{seg}.seg", dir=BASE_DIR) as tmp_file:
+                shutil.copyfileobj(response, tmp_file)
+                seg_status.segs[seg] = tmp_file.name
+            return True
                 
-        except urllib.error.HTTPError as e:
-            debug(f"{log_prefix} Seg {seg} Failed with {e.code}")
-            if e.code == 403:
-                try:
-                    openurl(base_url)
-                except urllib.error.HTTPError as e2:
-                    return False
-            return False
+    except urllib.error.HTTPError as e:
+        debug(f"{log_prefix} Seg {seg} Failed with {e.code}")
+        if e.code == 403:
+            try:
+                openurl(base_url)
+            except urllib.error.HTTPError:
+                return False
+        return False
 
-        except (http.client.IncompleteRead, socket.timeout, TimeoutError) as e: # TimeoutError by @timeout decorator.
-            return False
+    except (http.client.IncompleteRead, socket.timeout, TimeoutError): # TimeoutError by @timeout decorator.
+        return False
 
-        except:
-            return False
+    except:
+        return False
 
 def merge_segs(target_file, seg_status, not_merged_segs=[], log_prefix=""):
     while seg_status.merged_seg != seg_status.end_seg:
@@ -363,7 +362,7 @@ def merge_segs(target_file, seg_status, not_merged_segs=[], log_prefix=""):
         seg_status.merged_seg += 1
         seg_status.segs.pop(seg_status.merged_seg)
 
-def download_seg_group(url, seg_group_index, seg_status, log_prefix="", print=print, post_dl_seg=lambda x:True):
+def download_seg_group(url, seg_group_index, seg_status, log_prefix="", post_dl_seg=lambda x:True):
     seg_range = seg_status.seg_groups[seg_group_index]
     seg = seg_range[0]
     fail_count = 0
@@ -372,7 +371,11 @@ def download_seg_group(url, seg_group_index, seg_status, log_prefix="", print=pr
         while True:
             if fail_count < FAIL_THRESHOLD:
                 debug(f"{log_prefix} Current Seg: {seg}")
-                status = download_segment(url, seg, seg_status, log_prefix, print)
+                try:
+                    status = download_segment(url, seg, seg_status, log_prefix)
+                except TimeoutError:
+                    status = False
+
                 if status:
                     debug(f"{log_prefix} Success Seg: {seg}")
                     if seg == seg_range[1]:
@@ -406,7 +409,7 @@ def main(url, target_file, not_merged_segs=[], log_prefix="", print=print):
     merge_thread.start()
 
     for i in range(len(seg_status.seg_groups)):
-        threading.Thread(target=download_seg_group, args=(url, i, seg_status, log_prefix, print, lambda x: pbar.done(x)), daemon=True).start()
+        threading.Thread(target=download_seg_group, args=(url, i, seg_status, log_prefix, lambda x: pbar.done(x)), daemon=True).start()
 
     merge_thread.join() # Wait for merge finished
 
