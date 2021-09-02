@@ -378,9 +378,9 @@ def download_seg_group(url, seg_group_index, seg_status, log_prefix="", post_dl_
 
                 if status:
                     debug(f"{log_prefix} Success Seg: {seg}")
+                    post_dl_seg(seg)
                     if seg == seg_range[1]:
                         return True
-                    post_dl_seg(seg)
                     seg += 1
                     fail_count = 0
                 else:
@@ -389,10 +389,10 @@ def download_seg_group(url, seg_group_index, seg_status, log_prefix="", post_dl_
                     time.sleep(1)
             else:
                 warn(f"{log_prefix} Giving up seg: {seg}")
-                if seg == seg_range[1]:
-                    return True
                 seg_status.segs[seg] = None # Skip this seg
                 post_dl_seg(seg)
+                if seg == seg_range[1]:
+                    return True
                 seg += 1
                 fail_count = 0
                 
