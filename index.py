@@ -79,20 +79,6 @@ def sanitize_filename(s, restricted=False, is_id=False):
         if not result:
             result = '_'
     return result
-
-def timeout(max_timeout):
-    """Timeout decorator, parameter in seconds."""
-    def timeout_decorator(item):
-        """Wrap the original function."""
-        @functools.wraps(item)
-        def func_wrapper(*args, **kwargs):
-            """Closure for function."""
-            pool = multiprocessing.pool.ThreadPool(processes=1)
-            async_result = pool.apply_async(item, args, kwargs)
-            # raises a TimeoutError if execution exceeds max_timeout
-            return async_result.get(max_timeout)
-        return func_wrapper
-    return timeout_decorator
 # ===== utils end =====
 
 ##### Beautiful stuff #####
@@ -266,7 +252,6 @@ def readfile(filepath, encoding="utf-8"):
     with open(filepath, "r", encoding=encoding) as f:
         return f.read()
 
-@timeout(HTTP_TIMEOUT + 1)
 def openurl(url, retry=0, source_address="random"):
     global opener
 
@@ -305,7 +290,6 @@ def openurl(url, retry=0, source_address="random"):
         error_handle(e)
 
 
-@timeout(HTTP_TIMEOUT * (RETRY_THRESHOLD + 1))
 def download_segment(base_url, seg, seg_status, log_prefix=""):
     target_url = get_seg_url(base_url, seg)
 
@@ -329,7 +313,7 @@ def download_segment(base_url, seg, seg_status, log_prefix=""):
                 return False
         return False
 
-    except (http.client.IncompleteRead, socket.timeout, TimeoutError): # TimeoutError by @timeout decorator.
+    except (http.client.IncompleteRead, socket.timeout):
         return False
 
     except:
@@ -371,10 +355,8 @@ def download_seg_group(url, seg_group_index, seg_status, log_prefix="", post_dl_
         while True:
             if fail_count < FAIL_THRESHOLD:
                 debug(f"{log_prefix} Current Seg: {seg}")
-                try:
-                    status = download_segment(url, seg, seg_status, log_prefix)
-                except TimeoutError:
-                    status = False
+                
+                status = download_segment(url, seg, seg_status, log_prefix)
 
                 if status:
                     debug(f"{log_prefix} Success Seg: {seg}")
