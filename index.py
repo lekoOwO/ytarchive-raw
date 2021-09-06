@@ -16,7 +16,6 @@ import functools
 import random
 import ipaddress
 import socket
-import multiprocessing.pool
 
 FAIL_THRESHOLD = 20
 RETRY_THRESHOLD = 3
@@ -564,11 +563,10 @@ if __name__ == "__main__":
         # The logfile will be overwritten every time so we'll keep appending the contents to ff_logtext
         with tempfile.NamedTemporaryFile(delete=False, prefix="ytarchive_raw.", suffix=f".ffmpeg.log", dir=BASE_DIR) as tmp_file:
             ff_logpath = tmp_file.name
-            ff_logpath_esc = ff_logpath.replace("\\", "\\\\").replace(":", "\\")
         
         ff_logtext = ""
         ff_env = os.environ.copy()
-        ff_env["FFREPORT"] = f"file={ff_logpath_esc}:level=32"  # 32=info/normal
+        ff_env["FFREPORT"] = f"file='{ff_logpath}':level=32"  # 32=info/normal
 
         if len(tmp_video) == 1:
             cmd = ["ffmpeg", "-y", "-v", "warning", "-i", tmp_video[0], "-i", tmp_audio[0], "-c", "copy"] + ffmpeg_params + [param['output']]
