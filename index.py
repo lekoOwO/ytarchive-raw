@@ -248,8 +248,11 @@ def get_pool_ip():
 ## IP Pool end
 
 def readfile(filepath, encoding="utf-8"):
-    with open(filepath, "r", encoding=encoding) as f:
-        return f.read()
+    try:
+        with open(filepath, "r", encoding=encoding) as f:
+            return f.read()
+    except:
+        return ""
 
 def openurl(url, retry=0, source_address="random"):
     global opener
