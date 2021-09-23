@@ -1,3 +1,5 @@
+"""This project introduces a new method to grab Privated,
+Removed or any unavailable YouTube livestreams with prepared metadata files."""
 import functools
 import http.client
 import ipaddress
@@ -14,6 +16,7 @@ import time
 import traceback
 import urllib.error
 import urllib.request
+from argparse import Namespace
 from datetime import date
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
@@ -56,7 +59,7 @@ ACCENT_CHARS = dict(
 socket.setdefaulttimeout(HTTP_TIMEOUT)
 
 # ===== utils =====
-def sanitize_filename(s, restricted=False, is_id=False):
+def sanitize_filename(substitution, restricted=False, is_id=False):
     """Sanitizes a string so it could be used as part of a filename.
     If restricted is set, use a stricter subset of allowed characters.
     Set is_id if this is not an arbitrary string, but an ID that should be kept
@@ -68,11 +71,11 @@ def sanitize_filename(s, restricted=False, is_id=False):
             return ACCENT_CHARS[char]
         if char == "?" or ord(char) < 32 or ord(char) == 127:
             return ""
-        elif char == '"':
+        if char == '"':
             return "" if restricted else "'"
-        elif char == ":":
+        if char == ":":
             return "_-" if restricted else " -"
-        elif char in "\\/|*<>":
+        if char in "\\/|*<>":
             return "_"
         if restricted and (char in "!&'()[]{}$;`^,#" or char.isspace()):
             return "_"
@@ -81,8 +84,10 @@ def sanitize_filename(s, restricted=False, is_id=False):
         return char
 
     # Handle timestamps
-    s = re.sub(r"[0-9]+(?::[0-9]+)+", lambda m: m.group(0).replace(":", "_"), s)
-    result = "".join(map(replace_insane, s))
+    substitution = re.sub(
+        r"[0-9]+(?::[0-9]+)+", lambda m: m.group(0).replace(":", "_"), substitution
+    )
+    result = "".join(map(replace_insane, substitution))
     if not is_id:
         while "__" in result:
             result = result.replace("__", "_")
@@ -101,41 +106,43 @@ def sanitize_filename(s, restricted=False, is_id=False):
 # ===== utils end =====
 
 ##### Beautiful stuff #####
-class bcolors:
-    HEADER = "\033[95m"
-    OKBLUE = "\033[94m"
-    OKCYAN = "\033[96m"
-    OKGREEN = "\033[92m"
-    WARNING = "\033[93m"
-    FAIL = "\033[91m"
-    ENDC = "\033[0m"
-    BOLD = "\033[1m"
-    UNDERLINE = "\033[4m"
+bcolors = Namespace(
+    HEADER="\033[95m",
+    OKBLUE="\033[94m",
+    OKCYAN="\033[96m",
+    OKGREEN="\033[92m",
+    WARNING="\033[93m",
+    FAIL="\033[91m",
+    ENDC="\033[0m",
+    BOLD="\033[1m",
+    UNDERLINE="\033[4m",
+)
 
 
-def debug(x):
+# TODO: add proper logging
+def debug(msg):
     if DEBUG:
-        print(f"[DEBUG] {x}")
+        print(f"[DEBUG] {msg}")
 
 
-def warn(x):
-    print(f"{bcolors.WARNING}[WARN] {x}{bcolors.ENDC}")
+def warn(msg):
+    print(f"{bcolors.WARNING}[WARN] {msg}{bcolors.ENDC}")
 
 
-def info(x):
-    print(f"[INFO] {x}")
+def info(msg):
+    print(f"[INFO] {msg}")
 
 
-def error(x):
-    print(f"{bcolors.FAIL}[ERROR] {x}{bcolors.ENDC}")
+def error(msg):
+    print(f"{bcolors.FAIL}[ERROR] {msg}{bcolors.ENDC}")
 
 
 class ProgressBar:
-    def __init__(self, total, print=print):
+    def __init__(self, total, print_func=print):
         self.total = total
         self.progress = []
         self.progress_index = {}
-        self.print = print
+        self.print = print_func
         self.finished = 0
 
         for i in range(PBAR_LEN):
@@ -143,22 +150,21 @@ class ProgressBar:
             self.progress.append([x, False])
             self.progress_index[x] = i
 
-    def done(self, i):
-        if i in self.progress_index:
-            self.progress[self.progress_index[i]][1] = True
+    def done(self, index):
+        if index in self.progress_index:
+            self.progress[self.progress_index[index]][1] = True
         self.finished += 1
         if not self.finished % PBAR_PRINT_INTERVAL or self.finished == self.total:
             self.print_progress()
 
     def print_progress(self):
-        bar = ""
+        bar_str = ""
         for x in self.progress:
-            bar += PBAR_SYMBOL if x[1] else PBAR_EMPTY_SYMBOL
-        self.print(bar, self.finished / self.total)
+            bar_str += PBAR_SYMBOL if x[1] else PBAR_EMPTY_SYMBOL
+        self.print(bar_str, self.finished / self.total)
 
 
 ##### - Beautiful stuff - #####
-global opener
 opener = None
 
 
@@ -171,8 +177,6 @@ def set_http_proxy(proxy):
 
 
 def set_socks5_proxy(host, port):
-    import socket
-
     import socks
 
     socks.set_default_proxy(socks.SOCKS5, proxy, port)
@@ -307,30 +311,27 @@ def openurl(url, retry=0, source_address="random"):
     def error_handle(e):
         if retry >= RETRY_THRESHOLD:
             raise e
-        else:
-            return openurl(url, retry + 1, source_address)
+        return openurl(url, retry + 1, source_address)
 
     try:
         if opener:
             return opener.open(url)
-        else:
-            if source_address == "random":
-                source_address = get_pool_ip()
-            if not is_ip(source_address):
-                source_address = None
-            if source_address:
-                debug(f"Using IP: {source_address}")
-                if type(url) == str:
-                    schema = urllib.parse.urlsplit(url).scheme
-                elif isinstance(url, urllib.request.Request):
-                    schema = urllib.parse.urlsplit(url.full_url).scheme
+        if source_address == "random":
+            source_address = get_pool_ip()
+        if not is_ip(source_address):
+            source_address = None
+        if source_address:
+            debug(f"Using IP: {source_address}")
+            if isinstance(url, str):
+                schema = urllib.parse.urlsplit(url).scheme
+            elif isinstance(url, urllib.request.Request):
+                schema = urllib.parse.urlsplit(url.full_url).scheme
 
-                handler = (BoundHTTPHandler if schema == "http" else BoundHTTPSHandler)(
-                    source_address=(source_address, 0)
-                )
-                return urllib.request.build_opener(handler).open(url)
-            else:
-                return urllib.request.urlopen(url)
+            handler = (BoundHTTPHandler if schema == "http" else BoundHTTPSHandler)(
+                source_address=(source_address, 0)
+            )
+            return urllib.request.build_opener(handler).open(url)
+        return urllib.request.urlopen(url)
     except (http.client.IncompleteRead, socket.timeout) as e:
         error_handle(e)
     except urllib.error.HTTPError as e:
@@ -347,7 +348,10 @@ def download_segment(base_url, seg, seg_status, log_prefix=""):
     target_url_with_header = urllib.request.Request(
         target_url,
         headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36"
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36"
+            )
         },
     )
 
@@ -450,11 +454,11 @@ def download_seg_group(
         sys.exit(1)
 
 
-def main(url, target_file, not_merged_segs=[], log_prefix="", print=print):
+def main(url, target_file, not_merged_segs=[], log_prefix="", print_func=print):
     seg_status = SegmentStatus(url, log_prefix)
     pbar = ProgressBar(
         seg_status.end_seg,
-        lambda bar, p: print(f"{log_prefix}: |{bar}| {'{:.2f}'.format(p*100)}%"),
+        lambda bar, p: print_func(f"{log_prefix}: |{bar}| {'{:.2f}'.format(p*100)}%"),
     )
 
     merge_thread = threading.Thread(
@@ -488,7 +492,7 @@ if __name__ == "__main__":
         input_data = None
 
         args = sys.argv[1:]
-        if len(args):
+        if args:
             i = 0
             while i < len(args):
                 if args[i] == "-h" or args[i] == "--help":
@@ -566,9 +570,11 @@ if __name__ == "__main__":
             if param["output"] is None:
                 if input_data is not None:
                     try:
-                        param[
-                            "output"
-                        ] = f"{date.today().strftime('%Y%m%d')} {sanitize_filename(input_data['metadata']['title'])} ({input_data['metadata']['id']}).mkv"
+                        param["output"] = (
+                            f"{date.today().strftime('%Y%m%d')} "
+                            f"{sanitize_filename(input_data['metadata']['title'])} "
+                            f"({input_data['metadata']['id']}).mkv"
+                        )
                     except Exception as e:
                         raise RuntimeError(
                             "JSON Version should be > 1.0, please update to the latest grabber."
@@ -658,9 +664,9 @@ if __name__ == "__main__":
             while audio_thread.is_alive():
                 audio_thread.join(0.5)
 
-        if len(video_not_merged_segs):
+        if video_not_merged_segs:
             warn(f"Gived up video segments: {video_not_merged_segs}")
-        if len(audio_not_merged_segs):
+        if audio_not_merged_segs:
             warn(f"Gived up audio segments: {audio_not_merged_segs}")
 
         info("Download finished. Merging...")
@@ -700,10 +706,12 @@ if __name__ == "__main__":
                 'filename="thumbnail.jpg"',
             ]
 
-        # have FFmpeg write the full log to a tempfile, in addition to the terse log on stdout/stderr.
-        # The logfile will be overwritten every time so we'll keep appending the contents to ff_logtext
+        # have FFmpeg write the full log to a tempfile,
+        # in addition to the terse log on stdout/stderr.
+        # The logfile will be overwritten every time
+        # so we'll keep appending the contents to ff_logtext
         with tempfile.NamedTemporaryFile(
-            delete=False, prefix="ytarchive_raw.", suffix=f".ffmpeg.log", dir=BASE_DIR
+            delete=False, prefix="ytarchive_raw.", suffix=".ffmpeg.log", dir=BASE_DIR
         ) as tmp_file:
             ff_logpath = tmp_file.name
 
@@ -736,9 +744,9 @@ if __name__ == "__main__":
             retcode = p.returncode
             ff_logtext += readfile(ff_logpath)
 
-            if type(out) == bytes:
+            if isinstance(out, bytes):
                 out = out.decode(sys.stdout.encoding)
-            if type(err) == bytes:
+            if isinstance(err, bytes):
                 err = err.decode(sys.stdout.encoding)
         else:
             tmp_merged = []
@@ -773,9 +781,9 @@ if __name__ == "__main__":
                 retcode = retcode or p.returncode
                 ff_logtext += readfile(ff_logpath)
 
-                if type(out_i) == bytes:
+                if isinstance(out_i, bytes):
                     out += out_i.decode(sys.stdout.encoding)
-                if type(err_i) == bytes:
+                if isinstance(err_i, bytes):
                     err += err_i.decode(sys.stdout.encoding)
 
             merged_file_list = ""
@@ -811,9 +819,9 @@ if __name__ == "__main__":
 
             out_i, err_i = p.communicate()
 
-            if type(out_i) == bytes:
+            if isinstance(out_i, bytes):
                 out += out_i.decode(sys.stdout.encoding)
-            if type(err_i) == bytes:
+            if isinstance(err_i, bytes):
                 err += err_i.decode(sys.stdout.encoding)
 
         debug(f"FFmpeg complete log:\n{ff_logtext}\n")
