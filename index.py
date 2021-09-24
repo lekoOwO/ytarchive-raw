@@ -1,5 +1,6 @@
 """This project introduces a new method to grab Privated,
 Removed or any unavailable YouTube livestreams with prepared metadata files."""
+import argparse
 import functools
 import http.client
 import ipaddress
@@ -452,6 +453,64 @@ def download_seg_group(
     except:
         traceback.print_exc()
         sys.exit(1)
+
+
+def get_args():
+    parser = argparse.ArgumentParser(description="")
+    arg_dict = {
+        "input": {
+            "switch": ["-i", "--input"],
+            "help": "Input JSON file.",
+            "type": str,
+        },
+        "output": {
+            "switch": ["-o", "--output"],
+            "help": "Output file path. Uses `YYYYMMDD TITLE (VIDEO_ID).mkv` by default.",
+            "type": str,
+        },
+        "socks": {
+            "switch": ["-s", "--socks5-proxy"],
+            "help": (
+                "Socks5 Proxy. "
+                "No schema should be provided in the proxy url. "
+                "PySocks should be installed."
+            ),
+            "type": str,
+        },
+        "http-proxy": {
+            "switch": ["-P", "--http-proxy"],
+            "help": "HTTP Proxy",
+            "type": str,
+        },
+        "threads": {
+            "switch": ["-t", "--threads"],
+            "help": "Multi-threaded download",
+            "type": int,
+        },
+        "pool": {
+            "switch": ["-p", "--pool"],
+            "help": "IP Pool file.",
+            "type": str,
+        },
+        "temp-dir": {
+            "switch": ["-d", "--temp-dir"],
+            "help": "Directory containing the temporary files",
+            "type": str,
+        },
+    }
+    for arg in arg_dict:
+        parser.add_argument(
+            *arg_dict[arg]["switch"],
+            help=arg_dict[arg]["help"],
+            type=arg_dict[arg]["type"],
+        )
+    parser.add_argument(
+        "-v", "--verbose", help="Enable debug mode", action="store_true"
+    )
+    parser.add_argument(
+        "-k", "--keep-files", help="Do not delete temporary files", action="store_true"
+    )
+    return parser.parse_args()
 
 
 def main(url, target_file, not_merged_segs=[], log_prefix="", print_func=print):
