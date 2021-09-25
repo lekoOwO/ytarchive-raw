@@ -418,7 +418,7 @@ def merge_segs(target_file, seg_status, not_merged_segs=[], log_prefix=""):
 
 
 def download_seg_group(
-    url, seg_group_index, seg_status, log_prefix="", post_dl_seg=lambda x: True
+    url, seg_group_index, seg_status, log_prefix="", post_dl_seg=lambda _: True
 ):
     seg_range = seg_status.seg_groups[seg_group_index]
     seg = seg_range[0]
@@ -535,7 +535,7 @@ def main(url, target_file, not_merged_segs=[], log_prefix="", print_func=print):
     for i in range(len(seg_status.seg_groups)):
         threading.Thread(
             target=download_seg_group,
-            args=(url, i, seg_status, log_prefix, lambda x: pbar.done(x)),
+            args=(url, i, seg_status, log_prefix, pbar.done),
             daemon=True,
         ).start()
 
@@ -548,7 +548,6 @@ if __name__ == "__main__":
     try:
         # Parse params
         args = get_args()
-        print(args)
         param = {"output": None, "iv": [], "ia": [], "delete_tmp": True}
         with open(args.input, "r") as input_io:
             input_data = json.load(input_io)
