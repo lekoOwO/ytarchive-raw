@@ -183,18 +183,18 @@ def set_http_proxy(proxy):
 def set_socks5_proxy(host, port):
     import socks
 
-    socks.set_default_proxy(socks.SOCKS5, proxy, port)
+    socks.set_default_proxy(socks.SOCKS5, host, port)
     socket.socket = socks.socksocket
 
 
 def get_seg_url(url, seg):
     parsed_url = urlsplit(url)
-    qs = parse_qs(parsed_url.query)
+    parsed_query_string = parse_qs(parsed_url.query)
 
-    qs["sq"] = str(seg)
+    parsed_query_string["sq"] = str(seg)
 
     parsed_url = list(parsed_url)
-    parsed_url[3] = urlencode(qs, doseq=True)
+    parsed_url[3] = urlencode(parsed_query_string, doseq=True)
 
     return urlunsplit(parsed_url)
 
@@ -205,8 +205,8 @@ def get_total_segment(url):
     try:
         with urllib.request.urlopen(seg_url) as f:
             headers = f.headers
-    except urllib.error.HTTPError as e:
-        headers = e.headers
+    except urllib.error.HTTPError as http_error:
+        headers = http_error.headers
     return int(headers["x-head-seqnum"])
 
 
@@ -267,14 +267,14 @@ class BoundHTTPSHandler(urllib.request.HTTPSHandler):
 
 def get_random_line(filepath: str) -> str:
     file_size = os.path.getsize(filepath)
-    with open(filepath, "rb") as f:
+    with open(filepath, "rb") as file_io:
         while True:
             pos = random.randint(0, file_size)
             if not pos:  # the first line is chosen
-                return f.readline().decode()  # return str
-            f.seek(pos)  # seek to random position
-            f.readline()  # skip possibly incomplete line
-            line = f.readline()  # read next (full) line
+                return file_io.readline().decode()  # return str
+            file_io.seek(pos)  # seek to random position
+            file_io.readline()  # skip possibly incomplete line
+            line = file_io.readline()  # read next (full) line
             if line:
                 return line.decode()
             # else: line is empty -> EOF -> try another position in next iteration
@@ -303,9 +303,9 @@ def get_pool_ip():
 
 def readfile(filepath, encoding="utf-8"):
     try:
-        with open(filepath, "r", encoding=encoding) as f:
-            return f.read()
-    except:
+        with open(filepath, "r", encoding=encoding) as file_io:
+            return file_io.read()
+    except FileNotFoundError:
         return ""
 
 
@@ -408,7 +408,7 @@ def merge_segs(target_file, seg_status, not_merged_segs=[], log_prefix=""):
 
             try:
                 os.remove(seg_status.segs[seg_status.merged_seg + 1])
-            except:
+            except FileNotFoundError:
                 pass
         else:
             not_merged_segs.append(seg_status.merged_seg + 1)
@@ -506,11 +506,11 @@ def get_args():
             "type": int,
         },
     }
-    for arg in arg_dict:
+    for value in arg_dict.values():
         parser.add_argument(
-            *arg_dict[arg]["switch"],
-            help=arg_dict[arg]["help"],
-            type=arg_dict[arg]["type"],
+            *value["switch"],
+            help=value["help"],
+            type=value["type"],
             default=None,
         )
     parser.add_argument(
@@ -519,8 +519,7 @@ def get_args():
     parser.add_argument(
         "-k", "--keep-files", help="Do not delete temporary files", action="store_true"
     )
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
 
 
 def main(url, target_file, not_merged_segs=[], log_prefix="", print_func=print):
@@ -554,7 +553,7 @@ if __name__ == "__main__":
         # Parse params
         args = get_args()
         param = {"output": None, "iv": [], "ia": [], "delete_tmp": True}
-        with open(args.input, "r") as input_io:
+        with open(args.input, "r", encoding="UTF-8") as input_io:
             input_data = json.load(input_io)
             param["iv"].append(list(input_data["video"].values())[0])
             param["ia"].append(list(input_data["audio"].values())[0])
@@ -594,7 +593,7 @@ if __name__ == "__main__":
                 except Exception as e:
                     raise RuntimeError(
                         "JSON Version should be > 1.0, please update to the latest grabber."
-                    )
+                    ) from e
             else:
                 raise RuntimeError("Output param not found.")
         if pathlib.Path(param["output"]).suffix.lower() != ".mkv":
@@ -629,33 +628,31 @@ if __name__ == "__main__":
         video_not_merged_segs = []
         audio_not_merged_segs = []
 
-        for i in range(len(param["iv"])):
-            tmp_video_f = tempfile.NamedTemporaryFile(
+        for video_idx, _ in enumerate(param["iv"]):
+            with tempfile.NamedTemporaryFile(
                 delete=False,
                 prefix="ytarchive_raw.",
-                suffix=f".video.{i}",
+                suffix=f".video.{video_idx}",
                 dir=BASE_DIR,
-            )
-            tmp_video.append(tmp_video_f.name)
-            tmp_video_f.close()
+            ) as tmp_video_f:
+                tmp_video.append(tmp_video_f.name)
 
-            tmp_audio_f = tempfile.NamedTemporaryFile(
+            with tempfile.NamedTemporaryFile(
                 delete=False,
                 prefix="ytarchive_raw.",
-                suffix=f".audio.{i}",
+                suffix=f".audio.{video_idx}",
                 dir=BASE_DIR,
-            )
-            tmp_audio.append(tmp_audio_f.name)
-            tmp_audio_f.close()
+            ) as tmp_audio_f:
+                tmp_audio.append(tmp_audio_f.name)
 
-        for i in range(len(param["iv"])):
+        for video_idx, _ in enumerate(param["iv"]):
             video_thread = threading.Thread(
                 target=main,
                 args=(
-                    param["iv"][i],
-                    tmp_video[i],
+                    param["iv"][video_idx],
+                    tmp_video[video_idx],
                     video_not_merged_segs,
-                    f"[Video.{i}]",
+                    f"[Video.{video_idx}]",
                     lambda x: print(f"{bcolors.OKBLUE}{x}{bcolors.ENDC}"),
                 ),
                 daemon=True,
@@ -663,10 +660,10 @@ if __name__ == "__main__":
             audio_thread = threading.Thread(
                 target=main,
                 args=(
-                    param["ia"][i],
-                    tmp_audio[i],
+                    param["ia"][video_idx],
+                    tmp_audio[video_idx],
                     audio_not_merged_segs,
-                    f"[Audio.{i}]",
+                    f"[Audio.{video_idx}]",
                     lambda x: print(f"{bcolors.OKGREEN}{x}{bcolors.ENDC}"),
                 ),
                 daemon=True,
@@ -769,9 +766,11 @@ if __name__ == "__main__":
             out = ""
             err = ""
             retcode = 0
-            for i in range(len(param["iv"])):
+            for video_idx, _ in enumerate(param["iv"]):
                 with tempfile.NamedTemporaryFile(
-                    prefix="ytarchive_raw.", suffix=f".merged.{i}.mkv", dir=BASE_DIR
+                    prefix="ytarchive_raw.",
+                    suffix=f".merged.{video_idx}.mkv",
+                    dir=BASE_DIR,
                 ) as tmp_merged_f:
                     tmp_merged.append(tmp_merged_f.name)
 
@@ -781,14 +780,14 @@ if __name__ == "__main__":
                     "-v",
                     "warning",
                     "-i",
-                    tmp_video[i],
+                    tmp_video[video_idx],
                     "-i",
-                    tmp_audio[i],
+                    tmp_audio[video_idx],
                     "-c",
                     "copy",
-                    tmp_merged[i],
+                    tmp_merged[video_idx],
                 ]
-                debug(f"ffmpeg command merging [{i}]: {cmd}")
+                debug(f"ffmpeg command merging [{video_idx}]: {cmd}")
                 p = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env
                 )
@@ -812,8 +811,8 @@ if __name__ == "__main__":
                 mode="w+",
             ) as tmp_file:
                 data = []
-                for x in tmp_merged:
-                    data.append(f"file '{x}'")
+                for filename in tmp_merged:
+                    data.append(f"file '{filename}'")
                 data = "\n".join(data)
                 tmp_file.write(data)
                 merged_file_list = tmp_file.name
