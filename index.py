@@ -35,7 +35,6 @@ HTTP_TIMEOUT = 5
 
 BASE_DIR = None
 
-PBAR_LEN = 80
 PBAR_SYMBOL = "█"
 PBAR_EMPTY_SYMBOL = "-"
 PBAR_PRINT_INTERVAL = 5
@@ -124,6 +123,7 @@ bcolors = Namespace(
 
 # Custom formatter https://stackoverflow.com/questions/1343227/
 class Formatter(logging.Formatter):
+    """Custom Formatter for this script"""
 
     err_fmt = f"{bcolors.FAIL}[ERROR] %(msg)s{bcolors.ENDC}" "ERROR: %(msg)s"
     dbg_fmt = "[DEBUG] %(msg)s"
@@ -170,6 +170,8 @@ logger.setLevel(logging.DEBUG if DEBUG else logging.INFO)
 
 
 class ProgressBar:
+    """Just a progress bar"""
+
     def __init__(self, total, print_func=print):
         self.total = total
         self.progress = []
@@ -177,8 +179,9 @@ class ProgressBar:
         self.print = print_func
         self.finished = 0
 
-        for i in range(PBAR_LEN):
-            x = int(total / PBAR_LEN) * (i + 1)
+        pbar_len = os.get_terminal_size()[0] - 20
+        for i in range(pbar_len):
+            x = int(total / pbar_len) * (i + 1)
             self.progress.append([x, False])
             self.progress_index[x] = i
 
@@ -197,15 +200,15 @@ class ProgressBar:
 
 
 ##### - Beautiful stuff - #####
-opener = None
+OPENER = None
 
 
 def set_http_proxy(proxy):
-    global opener
+    global OPENER
     handler = urllib.request.ProxyHandler(
         {"http": f"http://{proxy}", "https": f"http://{proxy}"}
     )
-    opener = urllib.request.build_opener(handler)
+    OPENER = urllib.request.build_opener(handler)
 
 
 def set_socks5_proxy(host, port):
@@ -338,7 +341,7 @@ def readfile(filepath, encoding="utf-8"):
 
 
 def openurl(url, retry=0, source_address="random"):
-    global opener
+    global OPENER
 
     def error_handle(e):
         if retry >= RETRY_THRESHOLD:
@@ -346,8 +349,8 @@ def openurl(url, retry=0, source_address="random"):
         return openurl(url, retry + 1, source_address)
 
     try:
-        if opener:
-            return opener.open(url)
+        if OPENER:
+            return OPENER.open(url)
         if source_address == "random":
             source_address = get_pool_ip()
         if not is_ip(source_address):
@@ -550,7 +553,7 @@ def get_args():
     return parser.parse_args()
 
 
-def main(url, target_file, not_merged_segs=[], log_prefix="", print_func=print):
+def thread(url, target_file, not_merged_segs=[], log_prefix="", print_func=print):
     seg_status = SegmentStatus(url, log_prefix)
     pbar = ProgressBar(
         seg_status.end_seg,
@@ -675,7 +678,7 @@ if __name__ == "__main__":
 
         for video_idx, _ in enumerate(param["iv"]):
             video_thread = threading.Thread(
-                target=main,
+                target=thread,
                 args=(
                     param["iv"][video_idx],
                     tmp_video[video_idx],
@@ -686,7 +689,7 @@ if __name__ == "__main__":
                 daemon=True,
             )
             audio_thread = threading.Thread(
-                target=main,
+                target=thread,
                 args=(
                     param["ia"][video_idx],
                     tmp_audio[video_idx],
