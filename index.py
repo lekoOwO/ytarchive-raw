@@ -681,7 +681,7 @@ if __name__ == "__main__":
                     tmp_video[video_idx],
                     video_not_merged_segs,
                     f"[Video.{video_idx}]",
-                    lambda x: print(f"{bcolors.OKBLUE}{x}{bcolors.ENDC}"),
+                    lambda x: print(f"{bcolors.OKBLUE}{x}{bcolors.ENDC}", end="\r"),
                 ),
                 daemon=True,
             )
@@ -692,7 +692,7 @@ if __name__ == "__main__":
                     tmp_audio[video_idx],
                     audio_not_merged_segs,
                     f"[Audio.{video_idx}]",
-                    lambda x: print(f"{bcolors.OKGREEN}{x}{bcolors.ENDC}"),
+                    lambda x: print(f"{bcolors.OKGREEN}{x}{bcolors.ENDC}", end="\r"),
                 ),
                 daemon=True,
             )
