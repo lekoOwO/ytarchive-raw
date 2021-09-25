@@ -6,6 +6,7 @@ import http.client
 import ipaddress
 import itertools
 import json
+import logging
 import os
 import pathlib
 import random
@@ -61,7 +62,6 @@ ACCENT_CHARS = dict(
 )
 
 socket.setdefaulttimeout(HTTP_TIMEOUT)
-
 # ===== utils =====
 def sanitize_filename(substitution, restricted=False, is_id=False):
     """Sanitizes a string so it could be used as part of a filename.
@@ -122,23 +122,51 @@ bcolors = Namespace(
     UNDERLINE="\033[4m",
 )
 
+# Custom formatter https://stackoverflow.com/questions/1343227/
+class Formatter(logging.Formatter):
 
-# TODO: add proper logging
-def debug(msg):
-    if DEBUG:
-        print(f"[DEBUG] {msg}")
+    err_fmt = f"{bcolors.FAIL}[ERROR] %(msg)s{bcolors.ENDC}" "ERROR: %(msg)s"
+    dbg_fmt = "[DEBUG] %(msg)s"
+    info_fmt = "[INFO] %(msg)s"
+    warn_fmt = f"{bcolors.WARNING}[WARN] %(msg)s{bcolors.ENDC}"
+
+    def __init__(self, fmt="%(levelno)s: %(msg)s"):
+        logging.Formatter.__init__(self, fmt)
+
+    def format(self, record):
+
+        # Save the original format configured by the user
+        # when the logger formatter was instantiated
+        format_orig = self._fmt
+
+        # Replace the original format with one customized by logging level
+        if record.levelno == logging.DEBUG:
+            self._fmt = self.dbg_fmt
+
+        elif record.levelno == logging.INFO:
+            self._fmt = self.info_fmt
+
+        elif record.levelno == logging.ERROR:
+            self._fmt = self.err_fmt
+
+        elif record.levelno == logging.WARN:
+            self._fmt = self.warn_fmt
+
+        # Call the original formatter class to do the grunt work
+        result = logging.Formatter.format(self, record)
+
+        # Restore the original format configured by the user
+        self._fmt = format_orig
+
+        return result
 
 
-def warn(msg):
-    print(f"{bcolors.WARNING}[WARN] {msg}{bcolors.ENDC}")
-
-
-def info(msg):
-    print(f"[INFO] {msg}")
-
-
-def error(msg):
-    print(f"{bcolors.FAIL}[ERROR] {msg}{bcolors.ENDC}")
+logger = logging.getLogger(__name__)
+formatter = Formatter()
+handler = logging.StreamHandler()
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.DEBUG if DEBUG else logging.INFO)
 
 
 class ProgressBar:
@@ -215,9 +243,9 @@ class SegmentStatus:
         self.segs = {}
         self.merged_seg = -1
 
-        info(f"{log_prefix} Try getting total segments...")
+        logger.info(f"{log_prefix} Try getting total segments...")
         self.end_seg = get_total_segment(url)
-        info(f"{log_prefix} Total segments: {self.end_seg}")
+        logger.info(f"{log_prefix} Total segments: {self.end_seg}")
 
         self.seg_groups = []
 
@@ -325,7 +353,7 @@ def openurl(url, retry=0, source_address="random"):
         if not is_ip(source_address):
             source_address = None
         if source_address:
-            debug(f"Using IP: {source_address}")
+            logger.debug(f"Using IP: {source_address}")
             if isinstance(url, str):
                 schema = urllib.parse.urlsplit(url).scheme
             elif isinstance(url, urllib.request.Request):
@@ -372,7 +400,7 @@ def download_segment(base_url, seg, seg_status, log_prefix=""):
             return True
 
     except urllib.error.HTTPError as e:
-        debug(f"{log_prefix} Seg {seg} Failed with {e.code}")
+        logger.debug(f"{log_prefix} Seg {seg} Failed with {e.code}")
         if e.code == 403:
             try:
                 openurl(base_url)
@@ -390,7 +418,7 @@ def download_segment(base_url, seg, seg_status, log_prefix=""):
 def merge_segs(target_file, seg_status, not_merged_segs=[], log_prefix=""):
     while seg_status.merged_seg != seg_status.end_seg:
         if (seg_status.merged_seg + 1) not in seg_status.segs:
-            debug(
+            logger.debug(
                 f"{log_prefix} Waiting for Segment {seg_status.merged_seg + 1} ready for merging..."
             )
             time.sleep(1)
@@ -427,12 +455,12 @@ def download_seg_group(
     try:
         while True:
             if fail_count < FAIL_THRESHOLD:
-                debug(f"{log_prefix} Current Seg: {seg}")
+                logger.debug(f"{log_prefix} Current Seg: {seg}")
 
                 status = download_segment(url, seg, seg_status, log_prefix)
 
                 if status:
-                    debug(f"{log_prefix} Success Seg: {seg}")
+                    logger.debug(f"{log_prefix} Success Seg: {seg}")
                     post_dl_seg(seg)
                     if seg == seg_range[1]:
                         return True
@@ -440,12 +468,12 @@ def download_seg_group(
                     fail_count = 0
                 else:
                     fail_count += 1
-                    debug(
+                    logger.debug(
                         f"{log_prefix} Failed Seg: {seg} [{fail_count}/{FAIL_THRESHOLD}]"
                     )
                     time.sleep(1)
             else:
-                warn(f"{log_prefix} Giving up seg: {seg}")
+                logger.warn(f"{log_prefix} Giving up seg: {seg}")
                 seg_status.segs[seg] = None  # Skip this seg
                 post_dl_seg(seg)
                 if seg == seg_range[1]:
@@ -675,11 +703,11 @@ if __name__ == "__main__":
                 audio_thread.join(0.5)
 
         if video_not_merged_segs:
-            warn(f"Gived up video segments: {video_not_merged_segs}")
+            logger.warn(f"Gived up video segments: {video_not_merged_segs}")
         if audio_not_merged_segs:
-            warn(f"Gived up audio segments: {audio_not_merged_segs}")
+            logger.warn(f"Gived up audio segments: {audio_not_merged_segs}")
 
-        info("Download finished. Merging...")
+        logger.info("Download finished. Merging...")
 
         ffmpeg_params = []
         if input_data is not None:
@@ -746,7 +774,7 @@ if __name__ == "__main__":
                 + ffmpeg_params
                 + [param["output"]]
             )
-            debug(f"ffmpeg command: {cmd}")
+            logger.debug(f"ffmpeg command: {cmd}")
             p = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env
             )
@@ -782,7 +810,7 @@ if __name__ == "__main__":
                     "copy",
                     tmp_merged[i],
                 ]
-                debug(f"ffmpeg command merging [{i}]: {cmd}")
+                logger.debug(f"ffmpeg command merging [{video_idx}]: {cmd}")
                 p = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env
                 )
@@ -834,7 +862,7 @@ if __name__ == "__main__":
             if isinstance(err_i, bytes):
                 err += err_i.decode(sys.stdout.encoding)
 
-        debug(f"FFmpeg complete log:\n{ff_logtext}\n")
+        logger.debug(f"FFmpeg complete log:\n{ff_logtext}\n")
 
         # remove harmless warnings
         err = err.split("\n")
@@ -847,15 +875,15 @@ if __name__ == "__main__":
         err = "\n".join(err)
 
         if retcode:
-            error(f"FFmpeg complete log:\n{ff_logtext}\n")
-            error(f"FFmpeg:\n{err}\n\nFailed with error {retcode}")
+            logger.error(f"FFmpeg complete log:\n{ff_logtext}\n")
+            logger.error(f"FFmpeg:\n{err}\n\nFailed with error {retcode}")
         elif err:
-            warn(f"FFmpeg:\n{err}\n\nSuccess, but with warnings")
+            logger.warn(f"FFmpeg:\n{err}\n\nSuccess, but with warnings")
         else:
-            info("All good!")
+            logger.info("All good!")
 
     except KeyboardInterrupt as e:
-        info("Program stopped.")
+        logger.info("Program stopped.")
 
     finally:
         try:
