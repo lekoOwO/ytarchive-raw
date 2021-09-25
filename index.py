@@ -128,7 +128,7 @@ class Formatter(logging.Formatter):
     err_fmt = f"{bcolors.FAIL}[ERROR] %(msg)s{bcolors.ENDC}" "ERROR: %(msg)s"
     dbg_fmt = "[DEBUG] %(msg)s"
     info_fmt = "[INFO] %(msg)s"
-    warn_fmt = f"{bcolors.WARNING}[WARN] %(msg)s{bcolors.ENDC}"
+    warning_fmt = f"{bcolors.WARNING}[WARN] %(msg)s{bcolors.ENDC}"
 
     def __init__(self, fmt="%(levelno)s: %(msg)s"):
         logging.Formatter.__init__(self, fmt)
@@ -150,7 +150,7 @@ class Formatter(logging.Formatter):
             self._fmt = self.err_fmt
 
         elif record.levelno == logging.WARN:
-            self._fmt = self.warn_fmt
+            self._fmt = self.warning_fmt
 
         # Call the original formatter class to do the grunt work
         result = logging.Formatter.format(self, record)
@@ -476,7 +476,7 @@ def download_seg_group(
                     )
                     time.sleep(1)
             else:
-                logger.warn(f"{log_prefix} Giving up seg: {seg}")
+                logger.warning(f"{log_prefix} Giving up seg: {seg}")
                 seg_status.segs[seg] = None  # Skip this seg
                 post_dl_seg(seg)
                 if seg == seg_range[1]:
@@ -577,6 +577,243 @@ def thread(url, target_file, not_merged_segs=[], log_prefix="", print_func=print
     merge_thread.join()  # Wait for merge finished
 
 
+def download():
+    tmp_video = []
+    tmp_audio = []
+    video_not_merged_segs = []
+    audio_not_merged_segs = []
+
+    for video_idx, _ in enumerate(param["iv"]):
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            prefix="ytarchive_raw.",
+            suffix=f".video.{video_idx}",
+            dir=BASE_DIR,
+        ) as tmp_video_f:
+            tmp_video.append(tmp_video_f.name)
+
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            prefix="ytarchive_raw.",
+            suffix=f".audio.{video_idx}",
+            dir=BASE_DIR,
+        ) as tmp_audio_f:
+            tmp_audio.append(tmp_audio_f.name)
+
+    for video_idx, _ in enumerate(param["iv"]):
+        video_thread = threading.Thread(
+            target=thread,
+            args=(
+                param["iv"][video_idx],
+                tmp_video[video_idx],
+                video_not_merged_segs,
+                f"[Video.{video_idx}]",
+                lambda x: print(f"{bcolors.OKBLUE}{x}{bcolors.ENDC}", end="\r"),
+            ),
+            daemon=True,
+        )
+        audio_thread = threading.Thread(
+            target=thread,
+            args=(
+                param["ia"][video_idx],
+                tmp_audio[video_idx],
+                audio_not_merged_segs,
+                f"[Audio.{video_idx}]",
+                lambda x: print(f"{bcolors.OKGREEN}{x}{bcolors.ENDC}", end="\r"),
+            ),
+            daemon=True,
+        )
+
+        video_thread.start()
+        audio_thread.start()
+
+        while video_thread.is_alive():
+            video_thread.join(0.5)
+        while audio_thread.is_alive():
+            audio_thread.join(0.5)
+
+    if video_not_merged_segs:
+        logger.warning(f"Gived up video segments: {video_not_merged_segs}")
+    if audio_not_merged_segs:
+        logger.warning(f"Gived up audio segments: {audio_not_merged_segs}")
+
+    logger.info("Download finished. Merging...")
+    return tmp_video, tmp_audio
+
+
+def merge(tmp_video, tmp_audio):
+    ffmpeg_params = []
+    if input_data is not None:
+        tmp_thumbnail = None
+        with urllib.request.urlopen(input_data["metadata"]["thumbnail"]) as response:
+            with tempfile.NamedTemporaryFile(
+                delete=False, prefix="ytarchive_raw.", suffix=".jpg", dir=BASE_DIR
+            ) as tmp_file:
+                shutil.copyfileobj(response, tmp_file)
+                tmp_thumbnail = tmp_file.name
+
+        ffmpeg_params = [
+            "-metadata",
+            'title="{}"'.format(input_data["metadata"]["title"].replace('"', "''")),
+            "-metadata",
+            'comment="{}"'.format(
+                input_data["metadata"]["description"].replace('"', "''")
+            ),
+            "-metadata",
+            'author="{}"'.format(
+                input_data["metadata"]["channelName"].replace('"', "''")
+            ),
+            "-metadata",
+            'episode_id="{}"'.format(input_data["metadata"]["id"].replace('"', "''")),
+            "-attach",
+            tmp_thumbnail,
+            "-metadata:s:t",
+            "mimetype=image/jpeg",
+            "-metadata:s:t",
+            'filename="thumbnail.jpg"',
+        ]
+
+    # have FFmpeg write the full log to a tempfile,
+    # in addition to the terse log on stdout/stderr.
+    # The logfile will be overwritten every time
+    # so we'll keep appending the contents to ff_logtext
+    with tempfile.NamedTemporaryFile(
+        delete=False, prefix="ytarchive_raw.", suffix=".ffmpeg.log", dir=BASE_DIR
+    ) as tmp_file:
+        ff_logpath = tmp_file.name
+
+    ff_logtext = ""
+    ff_env = os.environ.copy()
+    ff_env["FFREPORT"] = f"file='{ff_logpath}':level=32"  # 32=info/normal
+
+    if len(tmp_video) == 1:
+        cmd = (
+            [
+                "ffmpeg",
+                "-y",
+                "-v",
+                "warning",
+                "-i",
+                tmp_video[0],
+                "-i",
+                tmp_audio[0],
+                "-c",
+                "copy",
+            ]
+            + ffmpeg_params
+            + [param["output"]]
+        )
+        logger.debug(f"ffmpeg command: {cmd}")
+        p = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env
+        )
+        out, err = p.communicate()
+        retcode = p.returncode
+        ff_logtext += readfile(ff_logpath)
+
+        if isinstance(out, bytes):
+            out = out.decode(sys.stdout.encoding)
+        if isinstance(err, bytes):
+            err = err.decode(sys.stdout.encoding)
+    else:
+        tmp_merged = []
+        out = ""
+        err = ""
+        retcode = 0
+        for video_idx, _ in enumerate(param["iv"]):
+            with tempfile.NamedTemporaryFile(
+                prefix="ytarchive_raw.",
+                suffix=f".merged.{video_idx}.mkv",
+                dir=BASE_DIR,
+            ) as tmp_merged_f:
+                tmp_merged.append(tmp_merged_f.name)
+
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-v",
+                "warning",
+                "-i",
+                tmp_video[video_idx],
+                "-i",
+                tmp_audio[video_idx],
+                "-c",
+                "copy",
+                tmp_merged[video_idx],
+            ]
+            logger.debug(f"ffmpeg command merging [{video_idx}]: {cmd}")
+            p = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env
+            )
+
+            out_i, err_i = p.communicate()
+            retcode = retcode or p.returncode
+            ff_logtext += readfile(ff_logpath)
+
+            if isinstance(out_i, bytes):
+                out += out_i.decode(sys.stdout.encoding)
+            if isinstance(err_i, bytes):
+                err += err_i.decode(sys.stdout.encoding)
+
+        merged_file_list = ""
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            prefix="ytarchive_raw.",
+            suffix=".merged.txt",
+            dir=BASE_DIR,
+            encoding="utf-8",
+            mode="w+",
+        ) as tmp_file:
+            data = []
+            for filename in tmp_merged:
+                data.append(f"file '{filename}'")
+            data = "\n".join(data)
+            tmp_file.write(data)
+            merged_file_list = tmp_file.name
+        if os.name == "nt":
+            cmd = ["ffmpeg", "-y", "-safe", "0", "-f", "concat"]
+        else:
+            cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0"]
+
+        cmd += (
+            ["-v", "warning", "-i", merged_file_list, "-c", "copy"]
+            + ffmpeg_params
+            + [param["output"]]
+        )
+        p = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env
+        )
+        retcode = retcode or p.returncode
+        ff_logtext += readfile(ff_logpath)
+
+        out_i, err_i = p.communicate()
+
+        if isinstance(out_i, bytes):
+            out += out_i.decode(sys.stdout.encoding)
+        if isinstance(err_i, bytes):
+            err += err_i.decode(sys.stdout.encoding)
+
+    logger.debug(f"FFmpeg complete log:\n{ff_logtext}\n")
+
+    # remove harmless warnings
+    err = err.split("\n")
+    for ignore in [
+        "    Last message repeated ",
+        "Found duplicated MOOV Atom. Skipped it",
+        "Found unknown-length element with ID 0x18538067 at pos.",  # segment header
+    ]:
+        err = [x for x in err if ignore not in x]
+    err = "\n".join(err)
+
+    if retcode:
+        logger.error(f"FFmpeg complete log:\n{ff_logtext}\n")
+        logger.error(f"FFmpeg:\n{err}\n\nFailed with error {retcode}")
+    elif err:
+        logger.warning(f"FFmpeg:\n{err}\n\nSuccess, but with warnings")
+    else:
+        logger.info("All good!")
+
+
 if __name__ == "__main__":
     os.system("")  # enable colors on windows
 
@@ -654,241 +891,8 @@ if __name__ == "__main__":
         else:
             os.makedirs(BASE_DIR)
 
-        tmp_video = []
-        tmp_audio = []
-        video_not_merged_segs = []
-        audio_not_merged_segs = []
-
-        for video_idx, _ in enumerate(param["iv"]):
-            with tempfile.NamedTemporaryFile(
-                delete=False,
-                prefix="ytarchive_raw.",
-                suffix=f".video.{video_idx}",
-                dir=BASE_DIR,
-            ) as tmp_video_f:
-                tmp_video.append(tmp_video_f.name)
-
-            with tempfile.NamedTemporaryFile(
-                delete=False,
-                prefix="ytarchive_raw.",
-                suffix=f".audio.{video_idx}",
-                dir=BASE_DIR,
-            ) as tmp_audio_f:
-                tmp_audio.append(tmp_audio_f.name)
-
-        for video_idx, _ in enumerate(param["iv"]):
-            video_thread = threading.Thread(
-                target=thread,
-                args=(
-                    param["iv"][video_idx],
-                    tmp_video[video_idx],
-                    video_not_merged_segs,
-                    f"[Video.{video_idx}]",
-                    lambda x: print(f"{bcolors.OKBLUE}{x}{bcolors.ENDC}", end="\r"),
-                ),
-                daemon=True,
-            )
-            audio_thread = threading.Thread(
-                target=thread,
-                args=(
-                    param["ia"][video_idx],
-                    tmp_audio[video_idx],
-                    audio_not_merged_segs,
-                    f"[Audio.{video_idx}]",
-                    lambda x: print(f"{bcolors.OKGREEN}{x}{bcolors.ENDC}", end="\r"),
-                ),
-                daemon=True,
-            )
-
-            video_thread.start()
-            audio_thread.start()
-
-            while video_thread.is_alive():
-                video_thread.join(0.5)
-            while audio_thread.is_alive():
-                audio_thread.join(0.5)
-
-        if video_not_merged_segs:
-            logger.warn(f"Gived up video segments: {video_not_merged_segs}")
-        if audio_not_merged_segs:
-            logger.warn(f"Gived up audio segments: {audio_not_merged_segs}")
-
-        logger.info("Download finished. Merging...")
-
-        ffmpeg_params = []
-        if input_data is not None:
-            tmp_thumbnail = None
-            with urllib.request.urlopen(
-                input_data["metadata"]["thumbnail"]
-            ) as response:
-                with tempfile.NamedTemporaryFile(
-                    delete=False, prefix="ytarchive_raw.", suffix=".jpg", dir=BASE_DIR
-                ) as tmp_file:
-                    shutil.copyfileobj(response, tmp_file)
-                    tmp_thumbnail = tmp_file.name
-
-            ffmpeg_params = [
-                "-metadata",
-                'title="{}"'.format(input_data["metadata"]["title"].replace('"', "''")),
-                "-metadata",
-                'comment="{}"'.format(
-                    input_data["metadata"]["description"].replace('"', "''")
-                ),
-                "-metadata",
-                'author="{}"'.format(
-                    input_data["metadata"]["channelName"].replace('"', "''")
-                ),
-                "-metadata",
-                'episode_id="{}"'.format(
-                    input_data["metadata"]["id"].replace('"', "''")
-                ),
-                "-attach",
-                tmp_thumbnail,
-                "-metadata:s:t",
-                "mimetype=image/jpeg",
-                "-metadata:s:t",
-                'filename="thumbnail.jpg"',
-            ]
-
-        # have FFmpeg write the full log to a tempfile,
-        # in addition to the terse log on stdout/stderr.
-        # The logfile will be overwritten every time
-        # so we'll keep appending the contents to ff_logtext
-        with tempfile.NamedTemporaryFile(
-            delete=False, prefix="ytarchive_raw.", suffix=".ffmpeg.log", dir=BASE_DIR
-        ) as tmp_file:
-            ff_logpath = tmp_file.name
-
-        ff_logtext = ""
-        ff_env = os.environ.copy()
-        ff_env["FFREPORT"] = f"file='{ff_logpath}':level=32"  # 32=info/normal
-
-        if len(tmp_video) == 1:
-            cmd = (
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-v",
-                    "warning",
-                    "-i",
-                    tmp_video[0],
-                    "-i",
-                    tmp_audio[0],
-                    "-c",
-                    "copy",
-                ]
-                + ffmpeg_params
-                + [param["output"]]
-            )
-            logger.debug(f"ffmpeg command: {cmd}")
-            p = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env
-            )
-            out, err = p.communicate()
-            retcode = p.returncode
-            ff_logtext += readfile(ff_logpath)
-
-            if isinstance(out, bytes):
-                out = out.decode(sys.stdout.encoding)
-            if isinstance(err, bytes):
-                err = err.decode(sys.stdout.encoding)
-        else:
-            tmp_merged = []
-            out = ""
-            err = ""
-            retcode = 0
-            for video_idx, _ in enumerate(param["iv"]):
-                with tempfile.NamedTemporaryFile(
-                    prefix="ytarchive_raw.",
-                    suffix=f".merged.{video_idx}.mkv",
-                    dir=BASE_DIR,
-                ) as tmp_merged_f:
-                    tmp_merged.append(tmp_merged_f.name)
-
-                cmd = [
-                    "ffmpeg",
-                    "-y",
-                    "-v",
-                    "warning",
-                    "-i",
-                    tmp_video[video_idx],
-                    "-i",
-                    tmp_audio[video_idx],
-                    "-c",
-                    "copy",
-                    tmp_merged[video_idx],
-                ]
-                logger.debug(f"ffmpeg command merging [{video_idx}]: {cmd}")
-                p = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env
-                )
-
-                out_i, err_i = p.communicate()
-                retcode = retcode or p.returncode
-                ff_logtext += readfile(ff_logpath)
-
-                if isinstance(out_i, bytes):
-                    out += out_i.decode(sys.stdout.encoding)
-                if isinstance(err_i, bytes):
-                    err += err_i.decode(sys.stdout.encoding)
-
-            merged_file_list = ""
-            with tempfile.NamedTemporaryFile(
-                delete=False,
-                prefix="ytarchive_raw.",
-                suffix=".merged.txt",
-                dir=BASE_DIR,
-                encoding="utf-8",
-                mode="w+",
-            ) as tmp_file:
-                data = []
-                for filename in tmp_merged:
-                    data.append(f"file '{filename}'")
-                data = "\n".join(data)
-                tmp_file.write(data)
-                merged_file_list = tmp_file.name
-            if os.name == "nt":
-                cmd = ["ffmpeg", "-y", "-safe", "0", "-f", "concat"]
-            else:
-                cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0"]
-
-            cmd += (
-                ["-v", "warning", "-i", merged_file_list, "-c", "copy"]
-                + ffmpeg_params
-                + [param["output"]]
-            )
-            p = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ff_env
-            )
-            retcode = retcode or p.returncode
-            ff_logtext += readfile(ff_logpath)
-
-            out_i, err_i = p.communicate()
-
-            if isinstance(out_i, bytes):
-                out += out_i.decode(sys.stdout.encoding)
-            if isinstance(err_i, bytes):
-                err += err_i.decode(sys.stdout.encoding)
-
-        logger.debug(f"FFmpeg complete log:\n{ff_logtext}\n")
-
-        # remove harmless warnings
-        err = err.split("\n")
-        for ignore in [
-            "    Last message repeated ",
-            "Found duplicated MOOV Atom. Skipped it",
-            "Found unknown-length element with ID 0x18538067 at pos.",  # segment header
-        ]:
-            err = [x for x in err if ignore not in x]
-        err = "\n".join(err)
-
-        if retcode:
-            logger.error(f"FFmpeg complete log:\n{ff_logtext}\n")
-            logger.error(f"FFmpeg:\n{err}\n\nFailed with error {retcode}")
-        elif err:
-            logger.warn(f"FFmpeg:\n{err}\n\nSuccess, but with warnings")
-        else:
-            logger.info("All good!")
+        tmp_video, tmp_audio = download()
+        merge(tmp_video, tmp_audio)
 
     except KeyboardInterrupt as e:
         logger.info("Program stopped.")
