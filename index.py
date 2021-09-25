@@ -5,12 +5,15 @@ import functools
 import http.client
 import ipaddress
 import itertools
+import json
 import os
+import pathlib
 import random
 import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -503,6 +506,7 @@ def get_args():
             *arg_dict[arg]["switch"],
             help=arg_dict[arg]["help"],
             type=arg_dict[arg]["type"],
+            default=None,
         )
     parser.add_argument(
         "-v", "--verbose", help="Enable debug mode", action="store_true"
@@ -510,7 +514,8 @@ def get_args():
     parser.add_argument(
         "-k", "--keep-files", help="Do not delete temporary files", action="store_true"
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    return args
 
 
 def main(url, target_file, not_merged_segs=[], log_prefix="", print_func=print):
@@ -538,116 +543,62 @@ def main(url, target_file, not_merged_segs=[], log_prefix="", print_func=print):
 
 
 if __name__ == "__main__":
-    import pathlib
-    import sys
-
     os.system("")  # enable colors on windows
 
     try:
         # Parse params
-
+        args = get_args()
+        print(args)
         param = {"output": None, "iv": [], "ia": [], "delete_tmp": True}
+        with open(args.input, "r") as input_io:
+            input_data = json.load(input_io)
+            param["iv"].append(list(input_data["video"].values())[0])
+            param["ia"].append(list(input_data["audio"].values())[0])
+        if args.output:
+            param["output"] = args.output
+        if args.socks5_proxy:
+            if ":" in args.socks5_proxy:
+                host, port = args.socks5_proxy.split(":")
+                port = int(port)
+            else:
+                host = args.socks5_proxy
+                port = 3128
+            set_socks5_proxy(host, port)
+        if args.http_proxy:
+            set_http_proxy(args.http_proxy)
+        if args.threads:
+            THREADS = int(args.threads)
+        if args.pool:
+            IP_POOL = args.pool
+        if args.verbose:
+            DEBUG = True
+        if args.temp_dir:
+            BASE_DIR = args.temp_dir
+        if args.keep_files:
+            param["delete_tmp"] = False
 
-        input_data = None
-
-        args = sys.argv[1:]
-        if args:
-            i = 0
-            while i < len(args):
-                if args[i] == "-h" or args[i] == "--help":
-                    print(
-                        """
-    Parameters:
-    -i, --input [JSON_FILE]     Input JSON file. Do not use with -iv or -ia.
-    -iv, --input-video [URL]    Input video URL. Use with -ia.
-    -ia, --input-audio [URL]    Input audio URL. Use with -iv.
-
-    -o, --output [OUTPUT_FILE]  Output file path. Uses `YYYYMMDD TITLE (VIDEO_ID).mkv` by default.
-    -s5, --socks5-proxy [proxy] Socks5 Proxy. No schema should be provided in the proxy url. PySocks should be installed.
-    -hp, --http-proxy [proxy]   HTTP Proxy.
-    -t, --threads [INT]         Multi-thread download, experimental.
-    -ft, --fail-threshold [INT] Secs for retrying when encounter HTTP errors. Default 20.
-    -p, --pool [FILE]           IP Pool file.
-    -td, --temp-dir [DIR]       Temp file dir.
-    -d, --debug                 Enable debug mode.
-    -D, --dont-delete-tmp       Do not delete temp folder.
-                    """
+        if param["output"] is None:
+            if input_data is not None:
+                try:
+                    param["output"] = (
+                        f"{date.today().strftime('%Y%m%d')} "
+                        f"{sanitize_filename(input_data['metadata']['title'])} "
+                        f"({input_data['metadata']['id']}).mkv"
                     )
-                    sys.exit()
-                if args[i] == "-i" or args[i] == "--input":
-                    import json
-
-                    with open(args[i + 1], encoding="UTF-8") as f:
-                        input_data = json.load(f)
-                        param["iv"].append([*input_data["video"].values()][0])
-                        param["ia"].append([*input_data["audio"].values()][0])
-                    i += 1
-                elif args[i] == "-iv" or args[i] == "--input-video":
-                    param["iv"].append(args[i + 1])
-                    i += 1
-                elif args[i] == "-ia" or args[i] == "--input-audio":
-                    param["ia"].append(args[i + 1])
-                    i += 1
-                elif args[i] == "-o" or args[i] == "--output":
-                    param["output"] = args[i + 1]
-                    i += 1
-                elif args[i] == "-s5" or args[i] == "--socks5-proxy":
-                    proxy = args[i + 1]
-                    if ":" in proxy:
-                        host, port = proxy.split(":")
-                        port = int(port)
-                    else:
-                        host = proxy
-                        port = 3128
-                    set_socks5_proxy(host, port)
-                    i += 1
-                elif args[i] == "-hp" or args[i] == "--http-proxy":
-                    proxy = args[i + 1]
-                    set_http_proxy(proxy)
-                    i += 1
-                elif args[i] == "-t" or args[i] == "--threads":
-                    THREADS = int(args[i + 1])
-                    i += 1
-                elif args[i] == "-ft" or args[i] == "--fail-threshold":
-                    FAIL_THRESHOLD = int(args[i + 1])
-                    i += 1
-                elif args[i] == "-p" or args[i] == "--pool":
-                    IP_POOL = args[i + 1]
-                    i += 1
-                elif args[i] == "-d" or args[i] == "--debug":
-                    DEBUG = True
-                elif args[i] == "-td" or args[i] == "--temp-dir":
-                    BASE_DIR = args[i + 1]
-                    i += 1
-                elif args[i] == "-D" or args[i] == "--dont-delete-tmp":
-                    param["delete_tmp"] = False
-                else:
-                    raise KeyError(f"Parameter not recognized: {args[i]}")
-
-                i += 1
-
-            if param["output"] is None:
-                if input_data is not None:
-                    try:
-                        param["output"] = (
-                            f"{date.today().strftime('%Y%m%d')} "
-                            f"{sanitize_filename(input_data['metadata']['title'])} "
-                            f"({input_data['metadata']['id']}).mkv"
-                        )
-                    except Exception as e:
-                        raise RuntimeError(
-                            "JSON Version should be > 1.0, please update to the latest grabber."
-                        )
-                else:
-                    raise RuntimeError("Output param not found.")
-            if pathlib.Path(param["output"]).suffix.lower() != ".mkv":
-                raise RuntimeError("Output should be a mkv file.")
-            if not param["ia"] or not param["iv"]:
-                raise RuntimeError(
-                    "Input data not sufficient. Both video and audio has to be inputed."
-                )
-            if len(param["ia"]) != len(param["iv"]):
-                raise RuntimeError("Input video and audio length mismatch.")
+                except Exception as e:
+                    raise RuntimeError(
+                        "JSON Version should be > 1.0, please update to the latest grabber."
+                    )
+            else:
+                raise RuntimeError("Output param not found.")
+        if pathlib.Path(param["output"]).suffix.lower() != ".mkv":
+            raise RuntimeError("Output should be a mkv file.")
+        if not param["ia"] or not param["iv"]:
+            raise RuntimeError(
+                "Input data not sufficient. Both video and audio has to be inputed."
+            )
+        if len(param["ia"]) != len(param["iv"]):
+            raise RuntimeError("Input video and audio length mismatch.")
 
         if not BASE_DIR:
             BASE_DIR = tempfile.mkdtemp(
