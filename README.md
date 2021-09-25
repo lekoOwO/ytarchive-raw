@@ -30,7 +30,9 @@ Parameters:
 -s, --socks5-proxy [proxy]  Socks5 Proxy. No schema should be provided in the proxy url. PySocks should be installed.
 -P, --http-proxy [proxy]    HTTP Proxy.
 -t, --threads [INT]         Multi-thread download, experimental.
+-T, --timeout [INT]         Secs for retrying when encounter HTTP errors. Default 20.
 -p, --pool [FILE]           IP Pool file.
 -d, --temp-dir [DIR]        Temp file dir.
 -v, --verbose               Enable debug mode.
+-k, --keep-files            Keep intermediate files
 ```
