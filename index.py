@@ -500,6 +500,11 @@ def get_args():
             "help": "Directory containing the temporary files",
             "type": str,
         },
+        "timeout": {
+            "switch": ["-T", "--timeout"],
+            "help": "Secs for retrying when encounter HTTP errors. Default 20.",
+            "type": int,
+        },
     }
     for arg in arg_dict:
         parser.add_argument(
@@ -567,7 +572,7 @@ if __name__ == "__main__":
         if args.http_proxy:
             set_http_proxy(args.http_proxy)
         if args.threads:
-            THREADS = int(args.threads)
+            THREADS = args.threads
         if args.pool:
             IP_POOL = args.pool
         if args.verbose:
@@ -576,6 +581,8 @@ if __name__ == "__main__":
             BASE_DIR = args.temp_dir
         if args.keep_files:
             param["delete_tmp"] = False
+        if args.timeout:
+            FAIL_THRESHOLD = args.timeout
 
         if param["output"] is None:
             if input_data is not None:

@@ -9,7 +9,7 @@ Use with [Auto YTA](https://github.com/lekoOwO/auto-ytarchive-raw) prevent any m
 ## Dependencies
 
  - ffmpeg
- 
+
  - python3 > 3.4
 
 ## Usage
@@ -32,8 +32,9 @@ Parameters:
 -s5, --socks5-proxy [proxy] Socks5 Proxy. No schema should be provided in the proxy url. PySocks should be installed.
 -hp, --http-proxy [proxy]   HTTP Proxy.
 -t, --threads [INT]         Multi-thread download, experimental.
--ft, --fail-threshold [INT] Secs for retrying when encounter HTTP errors. Default 20.
+-T, --timeout [INT]         Secs for retrying when encounter HTTP errors. Default 20.
 -p, --pool [FILE]           IP Pool file.
--td, --temp-dir [DIR]       Temp file dir.
--d, --debug                 Enable debug mode.
+-d, --temp-dir [DIR]        Temp file dir.
+-v, --verbose               Enable debug mode.
+-k, --keep-files            Keep intermediate files
 ```
