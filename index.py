@@ -555,9 +555,9 @@ def get_args():
     }
     defaults = {key: value["type"]() for key, value in arg_dict.items()}
 
-    if args.conf_file or os.path.exists("config.cfg"):
+    if args.config or os.path.exists("config.cfg"):
         config = ConfigParser()
-        config.read([args.conf_file or "config.cfg"])
+        config.read([args.config or "config.cfg"])
         defaults.update(dict(config.items("root")))
 
     # Parse rest of arguments
@@ -580,6 +580,9 @@ def get_args():
     parser.add_argument(
         "-k", "--keep-files", help="Do not delete temporary files", action="store_true"
     )
+    if len(sys.argv)==1:
+        parser.print_help(sys.stderr)
+        sys.exit(1)
     return parser.parse_args(remaining_argv)
 
 
