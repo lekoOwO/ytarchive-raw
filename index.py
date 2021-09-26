@@ -22,6 +22,7 @@ import traceback
 import urllib.error
 import urllib.request
 from argparse import Namespace
+from configparser import ConfigParser
 from datetime import date
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
@@ -130,7 +131,7 @@ class Formatter(logging.Formatter):
     info_fmt = "[INFO] %(msg)s"
     warning_fmt = f"{bcolors.WARNING}[WARN] %(msg)s{bcolors.ENDC}"
 
-    def __init__(self, fmt="%(levelno)s: %(msg)s"):
+    def __init__(self, fmt="%(msg)s"):
         logging.Formatter.__init__(self, fmt)
 
     def format(self, record):
@@ -490,7 +491,22 @@ def download_seg_group(
 
 
 def get_args():
-    parser = argparse.ArgumentParser(description="")
+    # https://stackoverflow.com/questions/2885190/
+    # Parse any conf_file specification
+    # We make this parser with add_help=False so that
+    # it doesn't parse -h and print help.
+    conf_parser = argparse.ArgumentParser(
+        description=__doc__,  # printed with -h/--help
+        # Don't mess with format of description
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        # Turn off help, so we print all options in response to -h
+        add_help=False,
+    )
+    conf_parser.add_argument(
+        "-c", "--config", help="Specify config file", metavar="FILE"
+    )
+    args, remaining_argv = conf_parser.parse_known_args()
+
     arg_dict = {
         "input": {
             "switch": ["-i", "--input"],
@@ -502,7 +518,7 @@ def get_args():
             "help": "Output file path. Uses `YYYYMMDD TITLE (VIDEO_ID).mkv` by default.",
             "type": str,
         },
-        "socks": {
+        "socks5-proxy": {
             "switch": ["-s", "--socks5-proxy"],
             "help": (
                 "Socks5 Proxy. "
@@ -537,6 +553,19 @@ def get_args():
             "type": int,
         },
     }
+    defaults = {key: value["type"]() for key, value in arg_dict.items()}
+
+    if args.conf_file or os.path.exists("config.cfg"):
+        config = ConfigParser()
+        config.read([args.conf_file or "config.cfg"])
+        defaults.update(dict(config.items("root")))
+
+    # Parse rest of arguments
+    # Don't suppress add_help here so it will handle -h
+    parser = argparse.ArgumentParser(
+        # Inherit options from config_parser
+        parents=[conf_parser]
+    )
     for value in arg_dict.values():
         parser.add_argument(
             *value["switch"],
@@ -544,13 +573,14 @@ def get_args():
             type=value["type"],
             default=None,
         )
+    parser.set_defaults(**defaults)
     parser.add_argument(
         "-v", "--verbose", help="Enable debug mode", action="store_true"
     )
     parser.add_argument(
         "-k", "--keep-files", help="Do not delete temporary files", action="store_true"
     )
-    return parser.parse_args()
+    return parser.parse_args(remaining_argv)
 
 
 def thread(url, target_file, not_merged_segs=[], log_prefix="", print_func=print):

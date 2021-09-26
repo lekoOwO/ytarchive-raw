@@ -26,6 +26,7 @@ See full parameter lists by `--help`:
 Parameters:
 -i, --input [JSON_FILE]     Input JSON file. Do not use with -iv or -ia.
 
+-c  --config [CONFIG_FILE]  Specify config file
 -o, --output [OUTPUT_FILE]  Output file path. Uses `YYYYMMDD TITLE (VIDEO_ID).mkv` by default.
 -s, --socks5-proxy [proxy]  Socks5 Proxy. No schema should be provided in the proxy url. PySocks should be installed.
 -P, --http-proxy [proxy]    HTTP Proxy.
