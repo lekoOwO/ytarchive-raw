@@ -820,7 +820,7 @@ if __name__ == "__main__":
                 merged_file_list = tmp_file.name
             if os.name == "nt":
                 cmd = ["ffmpeg", "-y", "-safe", "0", "-f", "concat"]
-            else:
+     
                 cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0"]
 
             cmd += (
